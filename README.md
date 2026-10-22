@@ -130,10 +130,13 @@ second, and caches it in `packs/.cache`.
 GitHub Actions runs five workflows (in `.github/workflows/`):
 
 - **CI**, on every pull request and push to `main`: the pipeline tests, the
-  interface strings check, `cargo fmt`, Clippy and the Rust tests on Linux.
+  interface strings check, `cargo fmt`, and Clippy and the tests of the
+  search core and CLI on Linux. (The desktop app would need WebKitGTK there,
+  so it is checked in the Windows build.)
 - **Windows build**, on pull requests and pushes to `main` that change the
   Rust code or the app (Windows minutes cost twice Linux minutes on private
-  repositories), or by hand: builds the app and uploads the MSI installer
+  repositories), or by hand: runs Clippy and the tests of the app, builds
+  it and uploads the MSI installer
   and the plain `.exe` as the `quick-dictionary-windows` artifact (GitHub
   zips artifacts; releases are not zipped).
 - **Release**, on every push to `main`:

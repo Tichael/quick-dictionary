@@ -62,6 +62,7 @@ jobs:
     name: Publish to the "packs" release
     needs: build
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     permissions:
       contents: write
     env:
