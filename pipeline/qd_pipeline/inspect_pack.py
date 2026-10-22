@@ -31,7 +31,7 @@ def stats(conn: sqlite3.Connection) -> None:
 def lookup(conn: sqlite3.Connection, query: str) -> None:
     key = normalize(query)
     rows = conn.execute(
-        "SELECT l.entry_id, l.kind, l.form_ord, e.word, e.pos, e.ipa"
+        "SELECT l.entry_id, l.kind, l.form_ord, l.note, e.word, e.pos, e.ipa"
         " FROM lookup l JOIN entries e ON e.id = l.entry_id"
         " WHERE l.key = ? ORDER BY l.kind, e.id",
         (key,),
@@ -39,8 +39,10 @@ def lookup(conn: sqlite3.Connection, query: str) -> None:
     if not rows:
         print(f"No match for {query!r} (key {key!r})")
         return
-    for entry_id, kind, form_ord, word, pos, ipa in rows:
+    for entry_id, kind, form_ord, note, word, pos, ipa in rows:
         print(f"\n== {word} ({pos}) {ipa or ''}  [{KIND_LABELS[kind]}]")
+        if note:
+            print(f"   note: {note}")
         if form_ord is not None:
             form, tags = conn.execute(
                 "SELECT form, tags FROM forms WHERE entry_id = ? AND ord = ?",

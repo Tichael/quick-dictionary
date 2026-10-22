@@ -48,9 +48,11 @@ written into the form itself (`je lance`, `nous lançons`). When the
 extractor could not map a header to a tag, the original French header is
 in `raw_tags` (JSON array, e.g. `["Passé simple"]`).
 
-### `lookup(key, entry_id, kind, form_ord)`
+### `lookup(key, entry_id, kind, form_ord, note)`
 
-The search index. `key` is a normalized search string (see below).
+The search index. `key` is a normalized search string (see below). `note`
+is only set on form-of rows, and holds the gloss that made the link
+("plural of goose").
 
 | kind | meaning                                                         |
 |------|-----------------------------------------------------------------|
@@ -61,6 +63,12 @@ The search index. `key` is a normalized search string (see below).
 
 There is at most one row per (key, entry). When several kinds apply, the
 lowest one is kept.
+
+Wiktionary also has a page for most inflected forms ("lance": *first
+person singular of lancer*). When every sense of such an entry is a form-of
+link, and its base word is in the pack, the entry is not stored. It becomes
+a kind-2 lookup row instead, since the base word's forms already describe
+it.
 
 ## Key normalization
 

@@ -56,7 +56,8 @@ CREATE TABLE lookup (
     key TEXT NOT NULL,
     entry_id INTEGER NOT NULL REFERENCES entries(id),
     kind INTEGER NOT NULL,
-    form_ord INTEGER
+    form_ord INTEGER,
+    note TEXT
 );
 """
 
@@ -129,9 +130,14 @@ class PackBuilder:
         self.lang = lang
         self.form_key = LANGUAGES[lang]["form_key"]
         self.next_id = 1
+        self.pending = {"entries": [], "senses": [], "forms": [], "lookup": []}
         self.redirects: list[tuple[str, str]] = []
-        # form_of targets are resolved after loading, once all headwords exist.
-        self.form_of_links: list[tuple[int, str]] = []
+        # Entries that are only "form of X" ("lance": form of "lancer"). Their
+        # targets are resolved once all headwords are known; the entry itself
+        # is then dropped, since X's forms table already describes it.
+        self.form_of_links: list[tuple[int, str, str, str, str]] = []
+        self.pure_form_ids: set[int] = set()
+        self.headwords: dict[str, list[tuple[int, str]]] = {}
         self.stats = {"lines": 0, "entries": 0, "skipped_lang": 0, "redirects": 0}
 
     def add(self, entry: dict) -> None:
@@ -153,34 +159,22 @@ class PackBuilder:
         self.next_id += 1
         self.stats["entries"] += 1
         word = entry["word"]
-        cur = self.conn.cursor()
-        cur.execute(
-            "INSERT INTO entries (id, word, pos, ipa, tags) VALUES (?, ?, ?, ?, ?)",
+        pos = entry.get("pos", "")
+        self.pending["entries"].append(
+            (entry_id, word, pos, _first_ipa(entry), _join_tags(entry.get("tags")))
+        )
+        self.pending["senses"].extend(
+            (entry_id, i, *row) for i, row in enumerate(senses)
+        )
+        self.pending["forms"].extend(
             (
                 entry_id,
-                word,
-                entry.get("pos", ""),
-                _first_ipa(entry),
-                _join_tags(entry.get("tags")),
-            ),
-        )
-        cur.executemany(
-            "INSERT INTO senses (entry_id, ord, glosses, tags, examples, form_of)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            [(entry_id, i, *row) for i, row in enumerate(senses)],
-        )
-        cur.executemany(
-            "INSERT INTO forms (entry_id, ord, form, tags, raw_tags) VALUES (?, ?, ?, ?, ?)",
-            [
-                (
-                    entry_id,
-                    i,
-                    f["form"],
-                    _join_tags(f.get("tags")),
-                    json.dumps(f["raw_tags"], ensure_ascii=False) if f.get("raw_tags") else None,
-                )
-                for i, f in enumerate(forms)
-            ],
+                i,
+                f["form"],
+                _join_tags(f.get("tags")),
+                json.dumps(f["raw_tags"], ensure_ascii=False) if f.get("raw_tags") else None,
+            )
+            for i, f in enumerate(forms)
         )
 
         headword_key = normalize(word)
@@ -191,41 +185,67 @@ class PackBuilder:
             # absolutely"): their words are already listed on their own.
             if key and " " not in key and key not in lookups:
                 lookups[key] = (KIND_FORM, i)
-        cur.executemany(
-            "INSERT INTO lookup (key, entry_id, kind, form_ord) VALUES (?, ?, ?, ?)",
-            [(key, entry_id, kind, ord_) for key, (kind, ord_) in lookups.items()],
+        self.pending["lookup"].extend(
+            (key, entry_id, kind, ord_, None) for key, (kind, ord_) in lookups.items()
         )
 
-        for sense in senses:
-            if sense[3]:
-                for target in json.loads(sense[3]):
-                    self.form_of_links.append((entry_id, target))
+        if senses and all(sense[3] for sense in senses):
+            self.pure_form_ids.add(entry_id)
+            for glosses, _, _, form_of in senses:
+                note = json.loads(glosses)[-1]
+                for target in json.loads(form_of):
+                    self.form_of_links.append((entry_id, headword_key, pos, target, note))
+        else:
+            self.headwords.setdefault(word, []).append((entry_id, pos))
+
+        if len(self.pending["entries"]) >= 10_000:
+            self.flush()
+
+    def flush(self) -> None:
+        sql = {
+            "entries": "INSERT INTO entries (id, word, pos, ipa, tags) VALUES (?, ?, ?, ?, ?)",
+            "senses": "INSERT INTO senses (entry_id, ord, glosses, tags, examples, form_of)"
+            " VALUES (?, ?, ?, ?, ?, ?)",
+            "forms": "INSERT INTO forms (entry_id, ord, form, tags, raw_tags) VALUES (?, ?, ?, ?, ?)",
+            "lookup": "INSERT INTO lookup (key, entry_id, kind, form_ord, note) VALUES (?, ?, ?, ?, ?)",
+        }
+        for table, rows in self.pending.items():
+            self.conn.executemany(sql[table], rows)
+            rows.clear()
 
     def finish(self) -> None:
+        self.flush()
         cur = self.conn.cursor()
-        cur.execute("CREATE TEMP TABLE headwords AS SELECT id, word FROM entries")
-        cur.execute("CREATE INDEX temp.headwords_word ON headwords(word)")
 
-        # "lance" is a form of "lancer": make the key "lance" also reach lancer.
-        cur.executemany(
-            "INSERT INTO lookup (key, entry_id, kind, form_ord)"
-            " SELECT DISTINCT l.key, h.id, ?, NULL"
-            " FROM lookup l JOIN headwords h ON h.word = ?"
-            " WHERE l.entry_id = ? AND l.kind = ?",
-            [
-                (KIND_FORM_OF, target, entry_id, KIND_HEADWORD)
-                for entry_id, target in self.form_of_links
-            ],
-        )
-        cur.executemany(
-            "INSERT INTO lookup (key, entry_id, kind, form_ord)"
-            " SELECT ?, id, ?, NULL FROM headwords WHERE word = ?",
-            [
-                (normalize(title), KIND_REDIRECT, target)
-                for title, target in self.redirects
-                if title
-            ],
-        )
+        # "lance" is a form of "lancer": make the key "lance" reach lancer,
+        # preferring targets with the same part of speech.
+        unresolved = set()
+        for entry_id, key, pos, target, note in self.form_of_links:
+            candidates = self.headwords.get(target)
+            if not candidates:
+                unresolved.add(entry_id)
+                continue
+            same_pos = [c for c in candidates if c[1] == pos] or candidates
+            self.pending["lookup"].extend(
+                (key, target_id, KIND_FORM_OF, None, note) for target_id, _ in same_pos
+            )
+        for title, target in self.redirects:
+            if title:
+                self.pending["lookup"].extend(
+                    (normalize(title), target_id, KIND_REDIRECT, None, None)
+                    for target_id, _ in self.headwords.get(target, [])
+                )
+        self.flush()
+
+        dropped = self.pure_form_ids - unresolved
+        self.stats["dropped_form_entries"] = len(dropped)
+        cur.execute("CREATE TEMP TABLE dropped (id INTEGER PRIMARY KEY)")
+        cur.executemany("INSERT INTO dropped (id) VALUES (?)", ((i,) for i in dropped))
+        cur.execute("DELETE FROM entries WHERE id IN (SELECT id FROM dropped)")
+        for table in ("senses", "forms", "lookup"):
+            cur.execute(f"DELETE FROM {table} WHERE entry_id IN (SELECT id FROM dropped)")
+        self.stats["entries"] -= len(dropped)
+
         # A key may reach the same entry several ways; keep the most direct.
         cur.execute(
             "DELETE FROM lookup WHERE rowid NOT IN ("

@@ -57,7 +57,10 @@ class BuildTest(unittest.TestCase):
 
     def test_french(self):
         conn = self.build_pack("fr")
-        self.assertEqual(self.stats["entries"], 6)  # "school" and the empty "vide" are dropped
+        # Dropped: "school" (English), the empty "vide", and the verb form
+        # "lance", which lancer's own forms already cover.
+        self.assertEqual(self.stats["entries"], 6)
+        self.assertEqual(self.stats["dropped_form_entries"], 1)
         self.assertEqual(self.find(conn, "ecole"), [("école", "noun", KIND_HEADWORD)])
         self.assertEqual(self.find(conn, "ECOLES"), [("école", "noun", KIND_FORM)])
         self.assertEqual(self.find(conn, "coeur"), [("cœur", "noun", KIND_HEADWORD)])
@@ -66,8 +69,10 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(self.find(conn, "abats"), [("s’abattre", "verb", KIND_FORM)])
         self.assertEqual(
             self.find(conn, "lance"),
-            [("lance", "verb", KIND_HEADWORD), ("lance", "noun", KIND_HEADWORD), ("lancer", "verb", KIND_FORM)],
+            [("lance", "noun", KIND_HEADWORD), ("lancer", "verb", KIND_FORM)],
         )
+        # A form whose base word is missing from the dump is kept as is.
+        self.assertEqual(self.find(conn, "chevals"), [("chevals", "noun", KIND_HEADWORD)])
         # Compound tenses are displayed but are not lookup keys.
         self.assertEqual(self.find(conn, "ai lance"), [])
         self.assertEqual(self.find(conn, "school"), [])
@@ -93,7 +98,7 @@ class BuildTest(unittest.TestCase):
         conn = self.build_pack("en")
         self.assertEqual(
             self.find(conn, "went"),
-            [("went", "verb", KIND_HEADWORD), ("go", "verb", KIND_FORM)],
+            [("go", "verb", KIND_FORM)],
         )
         self.assertEqual(self.find(conn, "children"), [("child", "noun", KIND_FORM)])
         self.assertEqual(self.find(conn, "cafe"), [("café", "noun", KIND_HEADWORD)])
@@ -105,10 +110,9 @@ class BuildTest(unittest.TestCase):
     def test_form_of_without_forms_table(self):
         # "goose" lists no forms; only the "geese" entry links back to it.
         conn = self.build_pack("en")
-        self.assertEqual(
-            self.find(conn, "geese"),
-            [("geese", "noun", KIND_HEADWORD), ("goose", "noun", KIND_FORM_OF)],
-        )
+        self.assertEqual(self.find(conn, "geese"), [("goose", "noun", KIND_FORM_OF)])
+        (note,) = conn.execute("SELECT note FROM lookup WHERE key = 'geese'").fetchone()
+        self.assertEqual(note, "plural of goose")
 
 
 if __name__ == "__main__":

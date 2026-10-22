@@ -8,3 +8,4 @@
 {"title": "Lancer", "redirect": "lancer"}
 {"word": "vide", "lang_code": "fr", "lang": "Français", "pos": "noun", "senses": []}
 {"title": "Ecole normale", "redirect": "école"}
+{"word": "chevals", "lang_code": "fr", "lang": "Français", "pos": "noun", "pos_title": "Forme de nom commun", "senses": [{"glosses": ["Pluriel de cheval (forme fautive)."], "form_of": [{"word": "cheval"}]}]}
