@@ -64,6 +64,8 @@ pub struct Pack {
     pub path: PathBuf,
     pub lang: String,
     pub lang_name: String,
+    /// When the pack was built (ISO 8601), from its `meta` table.
+    pub built_at: String,
     conn: Connection,
     /// Every search key, mapped to its frequency.
     keys: Map<Vec<u8>>,
@@ -92,14 +94,14 @@ impl Pack {
         }
         let lang = meta("lang")?;
         let lang_name = meta("lang_name")?;
+        let built_at = meta("built_at").unwrap_or_default();
         let cache_file = cache_dir.map(|dir| {
-            let built_at: String = meta("built_at")
-                .unwrap_or_default()
+            let version: String = built_at
                 .chars()
                 .filter(char::is_ascii_alphanumeric)
                 .collect();
             let stem = path.file_stem().unwrap_or_default().to_string_lossy();
-            dir.join(format!("{stem}.{built_at}.keys.fst"))
+            dir.join(format!("{stem}.{version}.keys.fst"))
         });
         let keys = match cache_file.as_deref().and_then(load_key_index) {
             Some(keys) => keys,
@@ -113,7 +115,22 @@ impl Pack {
                 keys
             }
         };
-        Ok(Pack { path: path.to_owned(), lang, lang_name, conn, keys })
+        Ok(Pack {
+            path: path.to_owned(),
+            lang,
+            lang_name,
+            built_at,
+            conn,
+            keys,
+        })
+    }
+
+    /// Number of entries (one per word and part of speech).
+    pub fn entry_count(&self) -> Result<u64, Error> {
+        let count: i64 = self
+            .conn
+            .query_row("SELECT COUNT(*) FROM entries", [], |r| r.get(0))?;
+        Ok(count as u64)
     }
 
     /// Number of distinct search keys.
@@ -128,9 +145,9 @@ impl Pack {
 
     /// All the ways `key` reaches an entry.
     pub fn hits(&self, key: &str) -> Result<Vec<Hit>, Error> {
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT entry_id, kind, form_ord, note FROM lookup WHERE key = ?",
-        )?;
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT entry_id, kind, form_ord, note FROM lookup WHERE key = ?")?;
         let rows = stmt.query_map([key], |r| {
             Ok(Hit {
                 entry_id: r.get(0)?,
@@ -143,13 +160,26 @@ impl Pack {
     }
 
     pub fn entry(&self, id: i64) -> Result<Entry, Error> {
-        let mut stmt = self.conn.prepare_cached(
-            "SELECT word, pos, ipa, tags, freq, data FROM entries WHERE id = ?",
-        )?;
-        let (word, pos, ipa, tags, freq, blob): (String, String, Option<String>, Option<String>, i64, Vec<u8>) =
-            stmt.query_row(params![id], |r| {
-                Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?))
-            })?;
+        let mut stmt = self
+            .conn
+            .prepare_cached("SELECT word, pos, ipa, tags, freq, data FROM entries WHERE id = ?")?;
+        let (word, pos, ipa, tags, freq, blob): (
+            String,
+            String,
+            Option<String>,
+            Option<String>,
+            i64,
+            Vec<u8>,
+        ) = stmt.query_row(params![id], |r| {
+            Ok((
+                r.get(0)?,
+                r.get(1)?,
+                r.get(2)?,
+                r.get(3)?,
+                r.get(4)?,
+                r.get(5)?,
+            ))
+        })?;
         let mut json = Vec::new();
         ZlibDecoder::new(blob.as_slice()).read_to_end(&mut json)?;
         let data: EntryData = serde_json::from_slice(&json)?;
@@ -158,7 +188,9 @@ impl Pack {
             word,
             pos,
             ipa,
-            tags: tags.map(|t| t.split(' ').map(String::from).collect()).unwrap_or_default(),
+            tags: tags
+                .map(|t| t.split(' ').map(String::from).collect())
+                .unwrap_or_default(),
             freq: freq as u16,
             senses: data.senses,
             forms: data.forms,
@@ -175,7 +207,12 @@ impl Pack {
             if candidate != key {
                 let distance = edit_distance(key, &candidate);
                 let cost = spelling_cost(key, &candidate);
-                matches.push(KeyMatch { key: candidate, distance, cost, freq: freq as u16 });
+                matches.push(KeyMatch {
+                    key: candidate,
+                    distance,
+                    cost,
+                    freq: freq as u16,
+                });
             }
         }
         Ok(matches)
@@ -183,7 +220,10 @@ impl Pack {
 
     /// The `limit` most frequent keys starting with `prefix`.
     pub fn complete(&self, prefix: &str, limit: usize) -> Vec<KeyMatch> {
-        let mut stream = self.keys.search(Str::new(prefix).starts_with()).into_stream();
+        let mut stream = self
+            .keys
+            .search(Str::new(prefix).starts_with())
+            .into_stream();
         let mut matches = Vec::new();
         while let Some((candidate, freq)) = stream.next() {
             matches.push(KeyMatch {
@@ -228,7 +268,9 @@ fn save_key_index(file: &Path, stem: &str, bytes: &[u8]) -> std::io::Result<()> 
     let prefix = format!("{stem}.");
     for old in std::fs::read_dir(dir)?.filter_map(Result::ok) {
         let name = old.file_name().to_string_lossy().into_owned();
-        let version = name.strip_prefix(&prefix).and_then(|n| n.strip_suffix(".keys.fst"));
+        let version = name
+            .strip_prefix(&prefix)
+            .and_then(|n| n.strip_suffix(".keys.fst"));
         let same_pack = version.is_some_and(|v| v.chars().all(|c| c.is_ascii_alphanumeric()));
         if same_pack && old.path() != file {
             let _ = std::fs::remove_file(old.path());

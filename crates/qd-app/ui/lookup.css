@@ -1,0 +1,175 @@
+body {
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  border: 1px solid var(--border);
+}
+
+header {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 10px 8px 8px 12px;
+  border-bottom: 1px solid var(--border);
+}
+
+#query {
+  flex: 1;
+  min-width: 0;
+  font: inherit;
+  font-size: 18px;
+  padding: 7px 10px;
+  color: var(--text);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  outline: none;
+}
+#query:focus { border-color: var(--accent); }
+#query::-webkit-search-cancel-button { display: none; }
+
+#completions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  padding: 0 12px;
+}
+#completions:not(:empty) { padding: 6px 12px; border-bottom: 1px solid var(--border); }
+#completions button {
+  font-size: 12px;
+  padding: 2px 8px;
+  border-radius: 999px;
+}
+
+#notice:not(:empty) {
+  padding: 8px 12px;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
+}
+
+#results {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0 12px;
+}
+
+.result {
+  padding: 8px 14px;
+  border-left: 3px solid transparent;
+  cursor: default;
+}
+.result:not(.selected):hover { background: var(--bg-hover); cursor: pointer; }
+.result.selected { background: var(--bg-selected); border-left-color: var(--accent); }
+
+.head {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.head .word {
+  font-size: 18px;
+  font-weight: 600;
+  border: none;
+  background: none;
+  padding: 0;
+  cursor: copy;
+}
+.head .word:hover { color: var(--accent); background: none; }
+.head .pos { color: var(--text-muted); font-style: italic; }
+.head .ipa { color: var(--text-faint); }
+.head .lang {
+  margin-left: auto;
+  font-size: 11px;
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 5px;
+}
+
+.match { color: var(--text-muted); margin-top: 2px; }
+.summary {
+  color: var(--text-muted);
+  margin-top: 2px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.senses { margin: 8px 0 4px; padding-left: 22px; }
+.senses li { margin: 4px 0; line-height: 1.4; }
+.senses li.extra { display: none; }
+.senses.all li.extra { display: list-item; }
+.senses .context { font-size: 12px; color: var(--text-faint); }
+.chip {
+  display: inline-block;
+  font-size: 11px;
+  color: var(--text-muted);
+  background: var(--bg-raised);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 0 4px;
+  margin-right: 4px;
+}
+.example {
+  font-style: italic;
+  color: var(--text-muted);
+  font-size: 13px;
+  margin-top: 2px;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+  cursor: pointer;
+}
+.example.open { -webkit-line-clamp: unset; }
+
+h4 { margin: 14px 0 6px; font-size: 13px; text-transform: uppercase; letter-spacing: 0.04em; color: var(--text-muted); }
+h4:empty { display: none; }
+
+table.forms { border-collapse: collapse; }
+table.forms th {
+  text-align: left;
+  font-weight: normal;
+  color: var(--text-muted);
+  padding: 2px 16px 2px 0;
+  vertical-align: top;
+}
+table.forms td { padding: 2px 0; }
+
+.mood { margin-bottom: 10px; }
+.mood-name { font-weight: 600; margin-bottom: 4px; }
+.tenses {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
+  gap: 6px;
+}
+.tense {
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 6px 8px;
+  line-height: 1.45;
+}
+.tense.hit { border-color: var(--accent); }
+.tense-name { font-size: 12px; color: var(--accent); font-weight: 600; }
+.conjugation:not(.show-compound) .tense.compound { display: none; }
+.conjugation.show-compound .toggle-compound { display: none; }
+
+mark { background: var(--highlight); color: inherit; border-radius: 2px; padding: 0 1px; }
+
+details summary { cursor: pointer; color: var(--text-muted); margin-top: 10px; }
+
+#toast {
+  position: fixed;
+  bottom: 12px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--text);
+  color: var(--bg);
+  padding: 4px 12px;
+  border-radius: 999px;
+  font-size: 12px;
+}

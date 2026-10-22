@@ -1,7 +1,7 @@
 //! Searching every installed pack at once, and ranking the results.
 
 use std::collections::HashSet;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Serialize;
 
@@ -49,24 +49,31 @@ pub struct Suggestion {
     pub key: String,
 }
 
+#[derive(Default)]
 pub struct Dictionary {
     pub packs: Vec<Pack>,
+    /// Packs that could not be opened, with the reason. The others still work.
+    pub failed: Vec<(PathBuf, Error)>,
 }
 
 impl Dictionary {
     /// Opens every `*.db` pack in `dir`, caching their search indexes in
-    /// `cache_dir` if given (see [`Pack::open`]).
+    /// `cache_dir` if given (see [`Pack::open`]). A pack that fails to open
+    /// is listed in `failed` rather than failing the whole dictionary.
     pub fn open_dir(dir: &Path, cache_dir: Option<&Path>) -> Result<Dictionary, Error> {
         let mut paths: Vec<_> = std::fs::read_dir(dir)?
             .filter_map(|e| e.ok().map(|e| e.path()))
             .filter(|p| p.extension().is_some_and(|ext| ext == "db"))
             .collect();
         paths.sort();
-        let packs = paths
-            .iter()
-            .map(|p| Pack::open(p, cache_dir))
-            .collect::<Result<Vec<_>, _>>()?;
-        Ok(Dictionary { packs })
+        let mut dictionary = Dictionary::default();
+        for path in paths {
+            match Pack::open(&path, cache_dir) {
+                Ok(pack) => dictionary.packs.push(pack),
+                Err(e) => dictionary.failed.push((path, e)),
+            }
+        }
+        Ok(dictionary)
     }
 
     /// Looks `query` up in every pack. Exact matches come first; when there
@@ -125,7 +132,13 @@ impl Dictionary {
             .iter()
             .flat_map(|pack| {
                 pack.complete(&normalized, limit).into_iter().map(|m| {
-                    (m.freq, Suggestion { lang: pack.lang.clone(), key: m.key })
+                    (
+                        m.freq,
+                        Suggestion {
+                            lang: pack.lang.clone(),
+                            key: m.key,
+                        },
+                    )
                 })
             })
             .collect();
@@ -173,12 +186,13 @@ impl Dictionary {
     ) -> Result<(), Error> {
         for hit in pack.hits(key)? {
             let entry = pack.entry(hit.entry_id)?;
-            let matched_form = hit.form_ord.and_then(|ord| entry.form(ord)).map(|(form, group)| {
-                MatchedForm {
+            let matched_form = hit
+                .form_ord
+                .and_then(|ord| entry.form(ord))
+                .map(|(form, group)| MatchedForm {
                     form: form.to_owned(),
                     tags: group.tags.iter().chain(&group.raw_tags).cloned().collect(),
-                }
-            });
+                });
             // Accents are ignored to find matches, but when the user typed
             // some, a match spelled with other accents is less likely meant
             // ("acheté" vs the noun "achète").
@@ -191,7 +205,13 @@ impl Dictionary {
                 && query.accented.as_deref().is_some_and(|typed| {
                     spelling.is_some_and(|s| !same_spelling(&pack.lang, typed, &fold_case(s)))
                 });
-            let score = score(&entry, hit.kind, matched_form.as_ref(), query.lowercase, accent_mismatch);
+            let score = score(
+                &entry,
+                hit.kind,
+                matched_form.as_ref(),
+                query.lowercase,
+                accent_mismatch,
+            );
             results.push(SearchResult {
                 lang: pack.lang.clone(),
                 lang_name: pack.lang_name.clone(),
@@ -236,7 +256,9 @@ impl Query {
 /// ("nous allions" and "allions").
 fn same_spelling(lang: &str, typed: &str, candidate: &str) -> bool {
     let typed_keys = query_keys(lang, typed);
-    query_keys(lang, candidate).iter().any(|k| typed_keys.contains(k))
+    query_keys(lang, candidate)
+        .iter()
+        .any(|k| typed_keys.contains(k))
 }
 
 /// The keys to look up for a query: the query itself, plus the query with

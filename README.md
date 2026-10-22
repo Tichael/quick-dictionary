@@ -5,9 +5,9 @@ small window opens. Type a word to see how it's spelled, its plural, its
 definitions and, for verbs, its full conjugation. Every installed language
 is searched at once, so there's nothing to switch.
 
-Status: early. The data pipeline and the search core work, with a
-command-line tool to try them. The desktop app (Tauri, Windows first) comes
-next.
+Status: early, but usable. The data pipeline, the search core and a first
+version of the desktop app (Tauri, Windows first) work. Dictionaries are not
+downloadable yet: build them with the pipeline below.
 
 ## Repository layout
 
@@ -16,6 +16,7 @@ next.
 | `pipeline/` | Python scripts that turn Wiktionary dumps into language packs |
 | `crates/qd-core/` | Rust library: opens packs, searches and ranks results |
 | `crates/qd-cli/`  | `qd`, a command-line tool on top of `qd-core`          |
+| `crates/qd-app/`  | The desktop app (Tauri): tray, shortcut, lookup and settings windows |
 | `spec/`     | Language pack format and shared test vectors                 |
 
 ## Building language packs
@@ -54,6 +55,47 @@ python -m qd_pipeline.inspect_pack ../packs/fr.db              # stats
 python -m qd_pipeline.inspect_pack ../packs/fr.db allions coeur
 ```
 
+## The desktop app
+
+The app lives in the tray. Press **Ctrl+Alt+D** (configurable) anywhere to
+open the lookup window and type a word. Esc hides the window, ↑/↓ move between
+results, Enter copies the selected word, and clicking a headword copies it too.
+The tray menu also opens the settings window: shortcut, start with the system,
+window behavior, theme, and the installed dictionaries.
+
+### Running it
+
+You need [Rust](https://rustup.rs/) and, on Windows, the MSVC build tools.
+WebView2 already ships with Windows 10 and 11.
+
+```sh
+cargo run -p quick-dictionary
+```
+
+The first launch opens the settings window so you can add dictionaries:
+click **Add a dictionary file…** and pick a pack (`fr.db`, `en.db`). The app
+copies it into its data folder (`%APPDATA%\io.github.tichael.quickdictionary\packs`
+on Windows). For development, `QD_PACKS=path/to/packs` makes the app use
+another folder instead.
+
+Debug builds open a console window that shows the app's log, including script
+errors from the windows. They don't register themselves to start at login
+unless you change that setting.
+
+### Building the installer
+
+```sh
+cargo install tauri-cli --version "^2" --locked
+cd crates/qd-app
+cargo tauri build
+```
+
+The installer is written to `target/release/bundle/nsis/`.
+
+On Linux, building the app needs the WebKitGTK development packages
+(`libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`,
+`libxdo-dev`). The rest of the project doesn't.
+
 ## Looking words up from the terminal
 
 ```sh
@@ -70,7 +112,7 @@ second, and caches it in `packs/.cache`.
 
 ```sh
 cd pipeline && python -m unittest   # pipeline
-cargo test                          # search core, from the repository root
+cargo test                          # search core and app, from the repository root
 ```
 
 The Rust tests search small packs in `crates/qd-core/tests/packs`, built by

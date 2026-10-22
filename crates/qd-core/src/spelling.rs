@@ -25,9 +25,8 @@ pub fn edit_distance(a: &str, b: &str) -> u32 {
 pub fn spelling_cost(typed: &str, candidate: &str) -> u32 {
     let a: Vec<char> = typed.chars().collect();
     let b: Vec<char> = candidate.chars().collect();
-    let doubled = |s: &[char], k: usize| {
-        (k > 0 && s[k - 1] == s[k]) || (k + 1 < s.len() && s[k + 1] == s[k])
-    };
+    let doubled =
+        |s: &[char], k: usize| (k > 0 && s[k - 1] == s[k]) || (k + 1 < s.len() && s[k + 1] == s[k]);
     let indel = |s: &[char], k: usize| if doubled(s, k) { 1 } else { 2 };
 
     // d[i][j]: cost of turning a[..i] into b[..j] (optimal string alignment).

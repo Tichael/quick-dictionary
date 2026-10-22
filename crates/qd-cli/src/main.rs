@@ -32,7 +32,9 @@ struct Options {
 
 fn parse_args() -> Result<Options, String> {
     let mut options = Options {
-        packs: std::env::var_os("QD_PACKS").map(PathBuf::from).unwrap_or_else(|| "packs".into()),
+        packs: std::env::var_os("QD_PACKS")
+            .map(PathBuf::from)
+            .unwrap_or_else(|| "packs".into()),
         complete: false,
         full: false,
         json: false,
@@ -80,16 +82,19 @@ fn main() -> ExitCode {
     let started = Instant::now();
     let cache_dir = options.packs.join(".cache");
     let dictionary = match Dictionary::open_dir(&options.packs, Some(&cache_dir)) {
-        Ok(d) if d.packs.is_empty() => {
-            eprintln!("qd: no *.db packs in {}", options.packs.display());
-            return ExitCode::FAILURE;
-        }
         Ok(d) => d,
         Err(e) => {
-            eprintln!("qd: {e}");
+            eprintln!("qd: {}: {e}", options.packs.display());
             return ExitCode::FAILURE;
         }
     };
+    for (path, error) in &dictionary.failed {
+        eprintln!("qd: skipping {}: {error}", path.display());
+    }
+    if dictionary.packs.is_empty() {
+        eprintln!("qd: no usable *.db packs in {}", options.packs.display());
+        return ExitCode::FAILURE;
+    }
     if options.time {
         let packs: Vec<_> = dictionary
             .packs
@@ -106,7 +111,10 @@ fn main() -> ExitCode {
             if options.json {
                 println!("{}", serde_json::to_string_pretty(&suggestions).unwrap());
             } else {
-                let keys: Vec<_> = suggestions.iter().map(|s| format!("{} ({})", s.key, s.lang)).collect();
+                let keys: Vec<_> = suggestions
+                    .iter()
+                    .map(|s| format!("{} ({})", s.key, s.lang))
+                    .collect();
                 println!("{word}: {}", keys.join(", "));
             }
         } else {
@@ -145,7 +153,10 @@ fn print_results(query: &str, results: &[SearchResult], full: bool) {
                 spellings.push(spelling);
             }
         }
-        println!("{query}: no exact match. Did you mean: {}?", spellings.join(", "));
+        println!(
+            "{query}: no exact match. Did you mean: {}?",
+            spellings.join(", ")
+        );
     }
     for result in results {
         let entry = &result.entry;
@@ -161,14 +172,21 @@ fn print_results(query: &str, results: &[SearchResult], full: bool) {
         match (&result.matched_form, result.kind) {
             (Some(form), _) => println!("    ↳ {} ({})", form.form, form.tags.join(" ")),
             (None, MatchKind::FormOf) => {
-                println!("    ↳ {}", result.note.as_deref().unwrap_or("form of this word"))
+                println!(
+                    "    ↳ {}",
+                    result.note.as_deref().unwrap_or("form of this word")
+                )
             }
             _ => {}
         }
 
         let senses = if full { entry.senses.len() } else { 3 };
         for sense in entry.senses.iter().take(senses) {
-            let label = if sense.tags.is_empty() { String::new() } else { format!(" [{}]", sense.tags.join(", ")) };
+            let label = if sense.tags.is_empty() {
+                String::new()
+            } else {
+                format!(" [{}]", sense.tags.join(", "))
+            };
             println!("    - {}{label}", sense.glosses.join(" › "));
             if full {
                 for example in &sense.examples {
@@ -182,11 +200,19 @@ fn print_results(query: &str, results: &[SearchResult], full: bool) {
 
         let groups = if full { entry.forms.len() } else { 4 };
         for group in entry.forms.iter().take(groups) {
-            let tags: Vec<_> = group.tags.iter().chain(&group.raw_tags).map(String::as_str).collect();
+            let tags: Vec<_> = group
+                .tags
+                .iter()
+                .chain(&group.raw_tags)
+                .map(String::as_str)
+                .collect();
             println!("    {}: {}", tags.join(" "), group.forms.join(", "));
         }
         if entry.forms.len() > groups {
-            println!("    … {} more form groups (--full)", entry.forms.len() - groups);
+            println!(
+                "    … {} more form groups (--full)",
+                entry.forms.len() - groups
+            );
         }
     }
     println!();

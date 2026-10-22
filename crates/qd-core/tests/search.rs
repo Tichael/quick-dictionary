@@ -6,7 +6,11 @@ use std::path::Path;
 use qd_core::{Dictionary, MatchKind, SearchResult};
 
 fn dictionary() -> Dictionary {
-    Dictionary::open_dir(&Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/packs"), None).unwrap()
+    Dictionary::open_dir(
+        &Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/packs"),
+        None,
+    )
+    .unwrap()
 }
 
 fn words(results: &[SearchResult]) -> Vec<(&str, &str, &str)> {
@@ -59,7 +63,11 @@ fn ranks_common_meanings_before_rare_ones() {
     let results = dictionary().search("went", 5).unwrap();
     assert_eq!(
         words(&results),
-        [("en", "go", "verb"), ("en", "went", "noun"), ("en", "Went", "name")]
+        [
+            ("en", "go", "verb"),
+            ("en", "went", "noun"),
+            ("en", "Went", "name")
+        ]
     );
     assert_eq!(results[0].kind, MatchKind::Form);
 }
@@ -68,7 +76,10 @@ fn ranks_common_meanings_before_rare_ones() {
 fn prefers_the_spelling_typed() {
     // "colour" is a form of "color" too, and "color" is more frequent.
     let results = dictionary().search("colour", 5).unwrap();
-    assert_eq!(words(&results), [("en", "colour", "noun"), ("en", "color", "noun")]);
+    assert_eq!(
+        words(&results),
+        [("en", "colour", "noun"), ("en", "color", "noun")]
+    );
 }
 
 #[test]
@@ -101,7 +112,10 @@ fn does_not_guess_on_short_queries() {
 fn searches_every_language() {
     // "lance" is only French here; the English pack has no match.
     let results = dictionary().search("lance", 5).unwrap();
-    assert_eq!(words(&results), [("fr", "lancer", "verb"), ("fr", "lance", "noun")]);
+    assert_eq!(
+        words(&results),
+        [("fr", "lancer", "verb"), ("fr", "lance", "noun")]
+    );
 }
 
 #[test]
@@ -119,7 +133,10 @@ fn caches_the_search_index() {
     let _ = std::fs::remove_dir_all(&cache);
 
     let first = Dictionary::open_dir(&packs, Some(&cache)).unwrap();
-    let cached: Vec<_> = std::fs::read_dir(&cache).unwrap().map(|e| e.unwrap().file_name()).collect();
+    let cached: Vec<_> = std::fs::read_dir(&cache)
+        .unwrap()
+        .map(|e| e.unwrap().file_name())
+        .collect();
     assert_eq!(cached.len(), 2, "{cached:?}");
 
     let second = Dictionary::open_dir(&packs, Some(&cache)).unwrap();

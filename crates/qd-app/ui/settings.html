@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quick Dictionary — Settings</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="settings.css">
+</head>
+<body>
+  <nav>
+    <a href="#general" class="current">General</a>
+    <a href="#behavior">Behavior</a>
+    <a href="#dictionaries">Dictionaries</a>
+    <a href="#about">About</a>
+  </nav>
+  <main>
+    <div id="message" hidden></div>
+
+    <section id="general">
+      <h2>General</h2>
+      <div class="row">
+        <div>
+          <div class="label">Shortcut</div>
+          <div class="hint">Opens the lookup window from anywhere. Press it again to hide the window.</div>
+        </div>
+        <button id="shortcut" class="shortcut" title="Click, then press the new shortcut"></button>
+      </div>
+      <label class="row">
+        <div>
+          <div class="label">Start with the system</div>
+          <div class="hint">Runs Quick Dictionary in the tray when you log in, so the shortcut always works.</div>
+        </div>
+        <input type="checkbox" data-setting="startWithSystem">
+      </label>
+    </section>
+
+    <section id="behavior">
+      <h2>Behavior</h2>
+      <label class="row">
+        <div>
+          <div class="label">Hide when the window loses focus</div>
+          <div class="hint">Clicking elsewhere closes the lookup window, like a menu.</div>
+        </div>
+        <input type="checkbox" data-setting="hideOnBlur">
+      </label>
+      <label class="row">
+        <div>
+          <div class="label">Start with an empty search</div>
+          <div class="hint">Otherwise the last word stays, selected, so typing replaces it.</div>
+        </div>
+        <input type="checkbox" data-setting="clearOnShow">
+      </label>
+      <label class="row">
+        <div class="label">Window position</div>
+        <select data-setting="position">
+          <option value="center">Center of the screen</option>
+          <option value="remember">Where I last moved it</option>
+        </select>
+      </label>
+      <label class="row">
+        <div class="label">Theme</div>
+        <select data-setting="theme">
+          <option value="system">Same as the system</option>
+          <option value="light">Light</option>
+          <option value="dark">Dark</option>
+        </select>
+      </label>
+      <label class="row">
+        <div class="label">Results per search</div>
+        <input type="number" min="1" max="50" data-setting="maxResults">
+      </label>
+    </section>
+
+    <section id="dictionaries">
+      <h2>Dictionaries</h2>
+      <p class="hint">
+        Every installed dictionary is searched at once. A dictionary is a language pack file
+        (<code>fr.db</code>, <code>en.db</code>…), built from Wiktionary with the tools in the
+        project's <code>pipeline</code> folder.
+      </p>
+      <div id="packs"></div>
+      <div class="actions">
+        <button id="add-pack" class="primary">Add a dictionary file…</button>
+        <button id="open-folder">Open the dictionaries folder</button>
+        <button id="reload">Reload</button>
+      </div>
+      <p class="hint" id="packs-dir"></p>
+    </section>
+
+    <section id="about">
+      <h2>About</h2>
+      <p>Quick Dictionary 0.1.0 — an offline dictionary and conjugator.</p>
+      <p class="hint">
+        The code is MIT-licensed. Dictionary text comes from
+        <a href="https://www.wiktionary.org/">Wiktionary</a> contributors, via
+        <a href="https://kaikki.org/">wiktextract and kaikki.org</a>; word frequencies come from
+        <a href="https://github.com/rspeer/wordfreq">wordfreq</a>. Both are licensed
+        <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>.
+      </p>
+    </section>
+  </main>
+  <script type="module" src="errors.js"></script>
+  <script type="module" src="settings.js"></script>
+</body>
+</html>

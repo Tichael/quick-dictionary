@@ -3,8 +3,26 @@
 //! `spec/form-key-vectors.json`.
 
 const FRENCH_PREFIXES: &[&str] = &[
-    "que ", "qu'", "je ", "j'", "tu ", "il/elle/on ", "il ", "elle ", "on ", "nous ", "vous ",
-    "ils/elles ", "ils ", "elles ", "me ", "m'", "te ", "t'", "se ", "s'",
+    "que ",
+    "qu'",
+    "je ",
+    "j'",
+    "tu ",
+    "il/elle/on ",
+    "il ",
+    "elle ",
+    "on ",
+    "nous ",
+    "vous ",
+    "ils/elles ",
+    "ils ",
+    "elles ",
+    "me ",
+    "m'",
+    "te ",
+    "t'",
+    "se ",
+    "s'",
 ];
 
 const FRENCH_SUFFIXES: &[&str] = &[

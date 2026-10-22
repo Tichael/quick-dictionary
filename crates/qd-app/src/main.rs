@@ -1,0 +1,428 @@
+//! Quick Dictionary: a tray app that opens a lookup window on a global
+//! shortcut.
+
+// No console window on Windows release builds.
+#![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
+
+mod library;
+mod settings;
+
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use qd_core::{SearchResult, Suggestion};
+use serde::Serialize;
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri_plugin_autostart::ManagerExt as _;
+use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
+use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri_plugin_opener::OpenerExt;
+
+use library::{Library, LibraryInfo};
+use settings::{Settings, WindowPosition, settings_file};
+
+const LOOKUP: &str = "lookup";
+const SETTINGS: &str = "settings";
+
+struct AppState {
+    library: Library,
+    settings: Mutex<Settings>,
+    settings_file: PathBuf,
+}
+
+fn settings(app: &AppHandle) -> Settings {
+    app.state::<AppState>().settings.lock().unwrap().clone()
+}
+
+// --- Windows -------------------------------------------------------------
+
+fn show_lookup(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(LOOKUP) else {
+        return;
+    };
+    if settings(app).position == WindowPosition::Center {
+        let _ = window.center();
+    }
+    let _ = window.show();
+    let _ = window.unminimize();
+    let _ = window.set_focus();
+    let _ = window.emit("lookup-shown", ());
+}
+
+fn toggle_lookup(app: &AppHandle) {
+    let Some(window) = app.get_webview_window(LOOKUP) else {
+        return;
+    };
+    let visible = window.is_visible().unwrap_or(false);
+    let focused = window.is_focused().unwrap_or(false);
+    if visible && focused {
+        let _ = window.hide();
+    } else {
+        show_lookup(app);
+    }
+}
+
+/// The lookup window lives for the whole session, hidden until the
+/// shortcut is pressed. It is created after the app state is managed, so
+/// its first commands always find it.
+fn create_lookup(app: &AppHandle) -> tauri::Result<()> {
+    WebviewWindowBuilder::new(app, LOOKUP, WebviewUrl::App("lookup.html".into()))
+        .title("Quick Dictionary")
+        .inner_size(580.0, 560.0)
+        .min_inner_size(380.0, 220.0)
+        .decorations(false)
+        .visible(false)
+        .always_on_top(true)
+        .skip_taskbar(true)
+        .center()
+        .shadow(true)
+        .build()?;
+    Ok(())
+}
+
+fn show_settings(app: &AppHandle) {
+    if let Some(window) = app.get_webview_window(SETTINGS) {
+        let _ = window.unminimize();
+        let _ = window.show();
+        let _ = window.set_focus();
+        return;
+    }
+    let built = WebviewWindowBuilder::new(app, SETTINGS, WebviewUrl::App("settings.html".into()))
+        .title("Quick Dictionary — Settings")
+        .inner_size(680.0, 620.0)
+        .min_inner_size(520.0, 400.0)
+        .center()
+        .build();
+    if let Err(e) = built {
+        eprintln!("opening settings: {e}");
+    }
+}
+
+// --- Settings that act on the system ------------------------------------
+
+/// Replaces the registered global shortcut. On failure (an invalid or
+/// already-taken shortcut), the previous one stays registered.
+fn apply_shortcut(app: &AppHandle, old: Option<&str>, new: &str) -> Result<(), String> {
+    let shortcuts = app.global_shortcut();
+    if let Some(old) = old {
+        let _ = shortcuts.unregister(old);
+    }
+    shortcuts.register(new).map_err(|e| {
+        if let Some(old) = old {
+            let _ = shortcuts.register(old);
+        }
+        format!("Could not use the shortcut “{new}”: {e}")
+    })
+}
+
+fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
+    let autostart = app.autolaunch();
+    let result = match (enabled, autostart.is_enabled().unwrap_or(false)) {
+        (true, false) => autostart.enable(),
+        (false, true) => autostart.disable(),
+        _ => Ok(()),
+    };
+    result.map_err(|e| format!("Could not change “start with the system”: {e}"))
+}
+
+// --- Commands called by the windows --------------------------------------
+
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+struct SearchResponse {
+    /// True while packs are still opening: results may be incomplete.
+    loading: bool,
+    /// No pack is installed (and none is loading).
+    no_packs: bool,
+    results: Vec<SearchResult>,
+    completions: Vec<Suggestion>,
+}
+
+#[tauri::command]
+fn search(query: String, state: State<AppState>) -> Result<SearchResponse, String> {
+    let library = &state.library;
+    let limit = state.settings.lock().unwrap().max_results;
+    let results = library.search(&query, limit)?;
+    let completions = library.complete(&query, 8);
+    let loading = library.is_loading();
+    let no_packs = !loading && library.pack_count() == 0;
+    Ok(SearchResponse {
+        loading,
+        no_packs,
+        results,
+        completions,
+    })
+}
+
+#[tauri::command]
+fn hide_lookup(app: AppHandle) {
+    if let Some(window) = app.get_webview_window(LOOKUP) {
+        let _ = window.hide();
+    }
+}
+
+#[tauri::command]
+fn open_settings(app: AppHandle) {
+    show_settings(&app);
+}
+
+/// Errors from the windows' scripts, written to the app's log (stderr).
+#[tauri::command]
+fn log_error(window: tauri::Window, message: String) {
+    eprintln!("[{}] {message}", window.label());
+}
+
+#[tauri::command]
+fn get_settings(state: State<AppState>) -> Settings {
+    state.settings.lock().unwrap().clone()
+}
+
+/// Saves new settings and applies them. Returns the settings now in effect:
+/// if the shortcut could not be registered, the old one is kept.
+#[tauri::command]
+fn save_settings(
+    new: Settings,
+    app: AppHandle,
+    state: State<AppState>,
+) -> Result<Settings, String> {
+    let old = state.settings.lock().unwrap().clone();
+    let mut new = new;
+    new.max_results = new.max_results.clamp(1, 50);
+    let mut errors = Vec::new();
+    if new.shortcut != old.shortcut
+        && let Err(e) = apply_shortcut(&app, Some(&old.shortcut), &new.shortcut)
+    {
+        errors.push(e);
+        new.shortcut = old.shortcut.clone();
+    }
+    if new.start_with_system != old.start_with_system
+        && let Err(e) = apply_autostart(&app, new.start_with_system)
+    {
+        errors.push(e);
+        new.start_with_system = old.start_with_system;
+    }
+    if let Err(e) = new.save(&state.settings_file) {
+        errors.push(format!("Could not save settings: {e}"));
+    }
+    *state.settings.lock().unwrap() = new.clone();
+    let _ = app.emit("settings-changed", &new);
+    if errors.is_empty() {
+        Ok(new)
+    } else {
+        Err(errors.join("\n"))
+    }
+}
+
+#[tauri::command]
+fn library_info(state: State<AppState>) -> LibraryInfo {
+    state.library.info()
+}
+
+/// Asks for a pack file and installs it. Returns its language code, or
+/// None if the user cancelled.
+#[tauri::command]
+async fn add_pack(app: AppHandle) -> Result<Option<String>, String> {
+    let picked = app
+        .dialog()
+        .file()
+        .set_title("Add a language pack")
+        .add_filter("Language packs", &["db"])
+        .blocking_pick_file();
+    let Some(picked) = picked else {
+        return Ok(None);
+    };
+    let path = picked.into_path().map_err(|e| e.to_string())?;
+    let lang = app.state::<AppState>().library.install(&path)?;
+    let _ = app.emit("library-changed", ());
+    Ok(Some(lang))
+}
+
+/// Asks for confirmation, then deletes an installed pack. Returns false if
+/// the user cancelled.
+#[tauri::command]
+async fn remove_pack(file: String, app: AppHandle) -> Result<bool, String> {
+    let confirmed = app
+        .dialog()
+        .message(format!(
+            "Remove the dictionary {file}? The file will be deleted."
+        ))
+        .title("Remove a dictionary")
+        .kind(MessageDialogKind::Warning)
+        .buttons(MessageDialogButtons::OkCancelCustom(
+            "Remove".into(),
+            "Cancel".into(),
+        ))
+        .blocking_show();
+    if !confirmed {
+        return Ok(false);
+    }
+    app.state::<AppState>().library.remove(&file)?;
+    let _ = app.emit("library-changed", ());
+    Ok(true)
+}
+
+#[tauri::command]
+async fn reload_packs(app: AppHandle) -> Result<(), String> {
+    let result = app.state::<AppState>().library.reload();
+    let _ = app.emit("library-changed", ());
+    result
+}
+
+#[tauri::command]
+fn open_packs_folder(app: AppHandle, state: State<AppState>) -> Result<(), String> {
+    let dir = &state.library.packs_dir;
+    std::fs::create_dir_all(dir).map_err(|e| e.to_string())?;
+    app.opener()
+        .open_path(dir.to_string_lossy(), None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+/// Opens a web link in the default browser (links in the settings window).
+#[tauri::command]
+fn open_url(url: String, app: AppHandle) -> Result<(), String> {
+    if !url.starts_with("https://") {
+        return Err(format!("not a web link: {url}"));
+    }
+    app.opener()
+        .open_url(url, None::<&str>)
+        .map_err(|e| e.to_string())
+}
+
+// --- Setup ---------------------------------------------------------------
+
+fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
+    let lookup = MenuItem::with_id(app, "lookup", "Look up a word", true, None::<&str>)?;
+    let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let separator = PredefinedMenuItem::separator(app)?;
+    let menu = Menu::with_items(app, &[&lookup, &settings, &separator, &quit])?;
+    TrayIconBuilder::with_id("main")
+        .icon(app.default_window_icon().cloned().expect("bundled icon"))
+        .tooltip("Quick Dictionary")
+        .menu(&menu)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "lookup" => show_lookup(app),
+            "settings" => show_settings(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                toggle_lookup(tray.app_handle());
+            }
+        })
+        .build(app)?;
+    Ok(())
+}
+
+fn main() {
+    tauri::Builder::default()
+        // Must come first: a second launch just shows the running app.
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            show_lookup(app)
+        }))
+        .plugin(
+            tauri_plugin_global_shortcut::Builder::new()
+                .with_handler(|app, _shortcut, event| {
+                    if event.state == ShortcutState::Pressed {
+                        toggle_lookup(app);
+                    }
+                })
+                .build(),
+        )
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            None,
+        ))
+        .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_opener::init())
+        .setup(|app| {
+            let paths = app.path();
+            // QD_PACKS points the app at another packs folder (development).
+            let packs_dir = std::env::var_os("QD_PACKS")
+                .map(PathBuf::from)
+                .unwrap_or(paths.app_data_dir()?.join("packs"));
+            let cache_dir = paths.app_cache_dir()?.join("indexes");
+            let settings_file = settings_file(&paths.app_config_dir()?);
+            let settings = Settings::load(&settings_file);
+
+            let handle = app.handle().clone();
+            if let Err(e) = apply_shortcut(&handle, None, &settings.shortcut) {
+                eprintln!("{e}");
+            }
+            // Development builds would register themselves to start at login:
+            // they only do so when the setting is changed explicitly.
+            if !cfg!(debug_assertions)
+                && let Err(e) = apply_autostart(&handle, settings.start_with_system)
+            {
+                eprintln!("{e}");
+            }
+            app.manage(AppState {
+                library: Library::new(packs_dir, cache_dir),
+                settings: Mutex::new(settings),
+                settings_file,
+            });
+            create_lookup(&handle)?;
+            setup_tray(&handle)?;
+
+            // Open the packs in the background: the first time, building
+            // their search indexes takes a few seconds.
+            std::thread::spawn(move || {
+                let state = handle.state::<AppState>();
+                if let Err(e) = state.library.reload() {
+                    eprintln!("opening packs: {e}");
+                }
+                let _ = handle.emit("library-changed", ());
+                if state.library.pack_count() == 0 {
+                    let ui = handle.clone();
+                    let _ = handle.run_on_main_thread(move || show_settings(&ui));
+                }
+            });
+            Ok(())
+        })
+        .on_window_event(|window, event| match event {
+            // The lookup window lives for the whole session: closing hides it.
+            WindowEvent::CloseRequested { api, .. } if window.label() == LOOKUP => {
+                api.prevent_close();
+                let _ = window.hide();
+            }
+            WindowEvent::Focused(false)
+                if window.label() == LOOKUP && settings(window.app_handle()).hide_on_blur =>
+            {
+                let _ = window.hide();
+            }
+            _ => {}
+        })
+        .invoke_handler(tauri::generate_handler![
+            search,
+            hide_lookup,
+            open_settings,
+            get_settings,
+            save_settings,
+            library_info,
+            add_pack,
+            remove_pack,
+            reload_packs,
+            open_packs_folder,
+            open_url,
+            log_error,
+        ])
+        .build(tauri::generate_context!())
+        .expect("building the app")
+        // Keep running in the tray when every window is closed.
+        .run(|_app, event| {
+            if let tauri::RunEvent::ExitRequested { api, code, .. } = event
+                && code.is_none()
+            {
+                api.prevent_exit();
+            }
+        });
+}

@@ -79,7 +79,10 @@ impl Entry {
     pub fn is_alternative(&self) -> bool {
         self.tags.iter().any(|t| t == "alt-of")
             || (!self.senses.is_empty()
-                && self.senses.iter().all(|s| s.tags.iter().any(|t| t == "alt-of")))
+                && self
+                    .senses
+                    .iter()
+                    .all(|s| s.tags.iter().any(|t| t == "alt-of")))
     }
 }
 
