@@ -1,0 +1,18 @@
+{
+  "fr": [
+    ["je lance", "lance"],
+    ["j'aime", "aime"],
+    ["il/elle/on lance", "lance"],
+    ["que nous lancions", "lancions"],
+    ["qu'ils/elles lancent", "lancent"],
+    ["je m'abats", "abats"],
+    ["nous nous lavons", "lavons"],
+    ["abats-toi", "abats"],
+    ["lancer", "lancer"],
+    ["porte-monnaie", "porte-monnaie"]
+  ],
+  "en": [
+    ["went", "went"],
+    ["more absolutely", "more absolutely"]
+  ]
+}

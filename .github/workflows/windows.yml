@@ -1,0 +1,51 @@
+name: Windows build
+
+# The Windows runner costs twice the Linux minutes, so this only runs when
+# the app or the Rust code changes, or by hand from the Actions tab.
+on:
+  push:
+    branches: [main]
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/windows.yml"
+  pull_request:
+    paths:
+      - "crates/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+      - ".github/workflows/windows.yml"
+  workflow_dispatch:
+
+concurrency:
+  group: windows-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  windows:
+    name: Windows build
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: clippy
+      - uses: Swatinem/rust-cache@v2
+      # The Linux CI job skips the app (it would need WebKitGTK there).
+      - name: Lint the app
+        run: cargo clippy -p quick-dictionary --all-targets -- -D warnings
+      - name: Test the app and the search core
+        run: cargo test -p quick-dictionary -p qd-core
+      - name: Build the app and its MSI installer
+        working-directory: crates/qd-app
+        run: npx --yes @tauri-apps/cli@2 build
+      - name: Upload the installer
+        uses: actions/upload-artifact@v4
+        with:
+          name: quick-dictionary-windows
+          path: |
+            target/release/bundle/msi/*.msi
+            target/release/quick-dictionary.exe
+          if-no-files-found: error

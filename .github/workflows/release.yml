@@ -1,0 +1,83 @@
+name: Release
+
+# semantic-release: on each push to main, the Conventional Commits since the
+# last release decide whether to release and the version (fix: patch,
+# feat: minor, feat!/BREAKING CHANGE: major). It bumps the version in
+# crates/qd-app/Cargo.toml, tags v<version> and creates the GitHub release;
+# the Windows job then attaches the MSI installer.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Decide and create the release
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      version: ${{ steps.semantic.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      # Releases start in 0.x: without any v* tag yet, tag the first commit
+      # v0.0.0 so the first feat: commit releases 0.1.0 (not 1.0.0).
+      - name: Create the v0.0.0 starting tag if there is no release yet
+        run: |
+          if [ -z "$(git tag --list 'v*')" ]; then
+            git tag v0.0.0 "$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+            git push origin v0.0.0
+          fi
+      - name: Run semantic-release
+        id: semantic
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >
+          npx --yes
+          -p semantic-release@24
+          -p @semantic-release/exec@6
+          -p @semantic-release/git@10
+          -p conventional-changelog-conventionalcommits@8
+          semantic-release
+
+  installer:
+    name: Attach the Windows installer
+    needs: release
+    if: needs.release.outputs.version != ''
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.release.outputs.version }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Build the MSI installer
+        working-directory: crates/qd-app
+        run: npx --yes @tauri-apps/cli@2 build
+      - name: Upload it to the release
+        run: |
+          msi="quick-dictionary-$VERSION-x64.msi"
+          cp target/release/bundle/msi/*.msi "$msi"
+          gh release upload "v$VERSION" "$msi" --clobber

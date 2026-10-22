@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Quick Dictionary</title>
+  <link rel="stylesheet" href="style.css">
+  <link rel="stylesheet" href="lookup.css">
+</head>
+<body>
+  <header data-tauri-drag-region>
+    <input id="query" type="search" data-i18n-placeholder="lookup.placeholder" placeholder="Type a word…" autocomplete="off" spellcheck="false" autofocus>
+    <button class="icon" id="settings" data-i18n-title="lookup.settings" title="Settings">⚙</button>
+    <button class="icon" id="close" data-i18n-title="lookup.hide" title="Hide (Esc)">✕</button>
+  </header>
+  <div id="completions"></div>
+  <div id="notice"></div>
+  <main id="results"></main>
+  <div id="toast" hidden></div>
+  <script type="module" src="errors.js"></script>
+  <script type="module" src="lookup.js"></script>
+</body>
+</html>

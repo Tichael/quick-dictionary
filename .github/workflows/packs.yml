@@ -1,0 +1,91 @@
+name: Language packs
+
+# Builds fr.db and en.db from the latest Wiktionary extracts (kaikki.org)
+# and wordfreq lists, and publishes them to the "packs" release, where the
+# app downloads them. Runs once a month, or by hand from the Actions tab.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "17 4 3 * *" # 04:17 UTC on the 3rd of each month
+
+# One build at a time; a new one waits rather than cancelling a publish.
+concurrency:
+  group: packs
+  cancel-in-progress: false
+
+jobs:
+  build:
+    name: Build ${{ matrix.lang }}.db
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - lang: fr
+            dump: https://kaikki.org/dictionary/downloads/fr/fr-extract.jsonl.gz
+            file: fr-extract.jsonl.gz
+          - lang: en
+            dump: https://kaikki.org/dictionary/English/kaikki.org-dictionary-English.jsonl
+            file: en-English.jsonl
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Download the Wiktionary extract and frequency list
+        working-directory: pipeline
+        run: |
+          mkdir -p raw
+          curl -fsSL --retry 3 -o raw/${{ matrix.file }} ${{ matrix.dump }}
+          curl -fsSL --retry 3 -o raw/large_${{ matrix.lang }}.msgpack.gz \
+            https://raw.githubusercontent.com/rspeer/wordfreq/master/wordfreq/data/large_${{ matrix.lang }}.msgpack.gz
+          ls -la raw
+      - name: Build the pack
+        working-directory: pipeline
+        run: |
+          python -m qd_pipeline.build --lang ${{ matrix.lang }} raw/${{ matrix.file }} \
+            --freq raw/large_${{ matrix.lang }}.msgpack.gz -o ../packs/${{ matrix.lang }}.db
+          rm -rf raw
+      - name: Show the pack's stats
+        working-directory: pipeline
+        run: python -m qd_pipeline.inspect_pack ../packs/${{ matrix.lang }}.db
+      - name: Hand the pack to the publish job
+        uses: actions/upload-artifact@v4
+        with:
+          name: pack-${{ matrix.lang }}
+          path: packs/${{ matrix.lang }}.db
+          if-no-files-found: error
+          retention-days: 1
+
+  publish:
+    name: Publish to the "packs" release
+    needs: build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - uses: actions/download-artifact@v4
+        with:
+          path: packs
+          merge-multiple: true
+      - name: Compress the packs and write the manifest
+        working-directory: pipeline
+        run: python -m qd_pipeline.release ../packs/*.db -o ../release
+      - name: Upload to the release
+        run: |
+          gh release view packs >/dev/null 2>&1 || gh release create packs \
+            --title "Language packs" --latest=false \
+            --notes "Dictionaries for Quick Dictionary, rebuilt from Wiktionary every month. The app downloads them from here (Settings → Dictionaries). Licensed CC BY-SA 4.0."
+          # Packs first, manifest last: the app only sees a new version once
+          # all its files are in place.
+          gh release upload packs release/*.db.gz --clobber
+          gh release upload packs release/manifest.json --clobber
