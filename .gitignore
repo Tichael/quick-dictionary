@@ -4,7 +4,7 @@ __pycache__/
 
 # Raw dumps and built packs are large and are not committed.
 pipeline/raw/
-packs/
+/packs/
 *.db
 *.db.tmp
 
