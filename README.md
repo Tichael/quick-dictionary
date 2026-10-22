@@ -127,7 +127,7 @@ second, and caches it in `packs/.cache`.
 
 ## Continuous integration
 
-GitHub Actions runs four workflows (in `.github/workflows/`):
+GitHub Actions runs five workflows (in `.github/workflows/`):
 
 - **CI**, on every pull request and push to `main`: the pipeline tests, the
   interface strings check, `cargo fmt`, Clippy and the Rust tests on Linux.
@@ -144,6 +144,8 @@ GitHub Actions runs four workflows (in `.github/workflows/`):
   to release, it sets the version in `crates/qd-app/Cargo.toml`, tags
   `v<version>`, creates the GitHub release with generated notes, and a
   Windows job attaches the MSI installer. Configured in `.releaserc.json`.
+- **PR title**, on pull requests: checks the title follows Conventional
+  Commits.
 - **Language packs**, once a month or by hand from the Actions tab: builds
   `fr.db` and `en.db` from the latest Wiktionary extracts and publishes them,
   compressed, with a `manifest.json` to the `packs` release (about 12 minutes).
@@ -153,9 +155,10 @@ the repository is public.
 
 ## Contributing
 
-Commit messages (or pull request titles, when squash-merging) follow
-[Conventional Commits](https://www.conventionalcommits.org/): they decide
-the next version.
+Pull requests are squash-merged, so their title becomes the commit that
+semantic-release reads: titles follow
+[Conventional Commits](https://www.conventionalcommits.org/) (`feat: …`,
+`fix(app): …`), and the **PR title** workflow checks it.
 
 ## Tests
 
