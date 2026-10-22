@@ -8,14 +8,14 @@ use serde::Serialize;
 use crate::Error;
 use crate::entry::{Entry, is_marginal};
 use crate::language::form_key;
-use crate::normalize::normalize;
+use crate::normalize::{fold_case, normalize};
 use crate::pack::{KeyMatch, MatchKind, Pack};
 
 /// How many close spellings to look up when the query has no exact match.
 const MAX_FUZZY_KEYS: usize = 6;
-/// Score cost of each edit between the query and a close spelling, in
-/// frequency units (Zipf times 100).
-const EDIT_COST: i32 = 200;
+/// Score cost of each half edit between the query and a close spelling,
+/// in frequency units (Zipf times 100). See [`crate::spelling_cost`].
+const HALF_EDIT_COST: i32 = 100;
 
 #[derive(Debug, Clone, Serialize)]
 pub struct SearchResult {
@@ -76,7 +76,7 @@ impl Dictionary {
         if normalized.is_empty() {
             return Ok(Vec::new());
         }
-        let lowercase_query = !query.chars().any(char::is_uppercase);
+        let query = Query::new(query, normalized.clone());
 
         let mut results = Vec::new();
         let mut best_exact_freq = None;
@@ -84,7 +84,7 @@ impl Dictionary {
             for key in query_keys(&pack.lang, &normalized) {
                 if let Some(freq) = pack.key_freq(&key) {
                     best_exact_freq = best_exact_freq.max(Some(freq));
-                    self.collect(pack, &key, 0, 0, lowercase_query, &mut results)?;
+                    self.collect(pack, &key, 0, 0, &query, &mut results)?;
                 }
             }
         }
@@ -96,7 +96,7 @@ impl Dictionary {
             for (rank, (pack, close)) in self.close_keys(&normalized)?.into_iter().enumerate() {
                 if best_exact_freq.is_none() || close.freq >= floor {
                     let (key, distance) = (&close.key, close.distance);
-                    self.collect(pack, key, distance, rank + 1, lowercase_query, &mut results)?;
+                    self.collect(pack, key, distance, rank + 1, &query, &mut results)?;
                 }
             }
         }
@@ -149,7 +149,7 @@ impl Dictionary {
                 }
             }
         }
-        let key_score = |m: &KeyMatch| i32::from(m.freq) - EDIT_COST * m.distance as i32;
+        let key_score = |m: &KeyMatch| i32::from(m.freq) - HALF_EDIT_COST * m.cost as i32;
         all.sort_by(|a, b| {
             key_score(&b.1)
                 .cmp(&key_score(&a.1))
@@ -168,7 +168,7 @@ impl Dictionary {
         key: &str,
         distance: u32,
         key_rank: usize,
-        lowercase_query: bool,
+        query: &Query,
         results: &mut Vec<SearchResult>,
     ) -> Result<(), Error> {
         for hit in pack.hits(key)? {
@@ -179,7 +179,19 @@ impl Dictionary {
                     tags: group.tags.iter().chain(&group.raw_tags).cloned().collect(),
                 }
             });
-            let score = score(&entry, hit.kind, matched_form.as_ref(), lowercase_query);
+            // Accents are ignored to find matches, but when the user typed
+            // some, a match spelled with other accents is less likely meant
+            // ("acheté" vs the noun "achète").
+            let spelling = match (&matched_form, hit.kind) {
+                (Some(form), _) => Some(form.form.as_str()),
+                (None, MatchKind::Headword) => Some(entry.word.as_str()),
+                _ => None,
+            };
+            let accent_mismatch = distance == 0
+                && query.accented.as_deref().is_some_and(|typed| {
+                    spelling.is_some_and(|s| !same_spelling(&pack.lang, typed, &fold_case(s)))
+                });
+            let score = score(&entry, hit.kind, matched_form.as_ref(), query.lowercase, accent_mismatch);
             results.push(SearchResult {
                 lang: pack.lang.clone(),
                 lang_name: pack.lang_name.clone(),
@@ -203,6 +215,30 @@ const RARE_FREQ: u16 = 250;
 /// How much more frequent a close spelling must be than a rare exact match.
 const FUZZY_MARGIN: u16 = 100;
 
+struct Query {
+    /// Whether the user typed no capitals: proper names are then unlikely.
+    lowercase: bool,
+    /// The query with case folded but accents kept, if it has any.
+    accented: Option<String>,
+}
+
+impl Query {
+    fn new(raw: &str, normalized: String) -> Query {
+        let folded = fold_case(raw);
+        Query {
+            lowercase: !raw.chars().any(char::is_uppercase),
+            accented: (folded != normalized).then_some(folded),
+        }
+    }
+}
+
+/// Whether two case-folded spellings are the same word, ignoring pronouns
+/// ("nous allions" and "allions").
+fn same_spelling(lang: &str, typed: &str, candidate: &str) -> bool {
+    let typed_keys = query_keys(lang, typed);
+    query_keys(lang, candidate).iter().any(|k| typed_keys.contains(k))
+}
+
 /// The keys to look up for a query: the query itself, plus the query with
 /// pronouns stripped ("que nous allions" -> "allions").
 fn query_keys(lang: &str, normalized: &str) -> Vec<String> {
@@ -216,8 +252,17 @@ fn query_keys(lang: &str, normalized: &str) -> Vec<String> {
 
 /// Ranks entries matching the same key: frequent words first, then demotes
 /// what people rarely mean (proper names, archaic words, variants).
-fn score(entry: &Entry, kind: MatchKind, form: Option<&MatchedForm>, lowercase_query: bool) -> i32 {
+fn score(
+    entry: &Entry,
+    kind: MatchKind,
+    form: Option<&MatchedForm>,
+    lowercase_query: bool,
+    accent_mismatch: bool,
+) -> i32 {
     let mut score = i32::from(entry.freq);
+    if accent_mismatch {
+        score -= 150;
+    }
     if lowercase_query && entry.word.chars().any(char::is_uppercase) {
         score -= 150;
     }

@@ -9,13 +9,15 @@ mod language;
 mod normalize;
 mod pack;
 mod search;
+mod spelling;
 
 use std::path::PathBuf;
 
 pub use entry::{Entry, FormGroup, Sense};
-pub use normalize::normalize;
-pub use pack::{MatchKind, Pack, edit_distance};
+pub use normalize::{fold_case, normalize};
+pub use pack::{KeyMatch, MatchKind, Pack};
 pub use search::{Dictionary, MatchedForm, SearchResult, Suggestion};
+pub use spelling::{edit_distance, spelling_cost};
 
 #[derive(Debug, thiserror::Error)]
 pub enum Error {

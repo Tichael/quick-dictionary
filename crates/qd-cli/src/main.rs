@@ -134,7 +134,18 @@ fn print_results(query: &str, results: &[SearchResult], full: bool) {
         return;
     }
     if results[0].distance > 0 {
-        println!("{query}: no exact match, showing close spellings");
+        let mut spellings: Vec<&str> = Vec::new();
+        for result in results {
+            let spelling = match &result.matched_form {
+                Some(form) => form.form.as_str(),
+                None if result.kind == MatchKind::Headword => result.entry.word.as_str(),
+                None => result.key.as_str(),
+            };
+            if !spellings.contains(&spelling) {
+                spellings.push(spelling);
+            }
+        }
+        println!("{query}: no exact match. Did you mean: {}?", spellings.join(", "));
     }
     for result in results {
         let entry = &result.entry;

@@ -20,17 +20,44 @@ pub fn normalize(text: &str) -> String {
             'ø' => mapped.push('o'),
             'đ' => mapped.push('d'),
             'ł' => mapped.push('l'),
-            '’' | '‘' | 'ʼ' | '′' => mapped.push('\''),
-            '‐' | '‑' | '–' | '—' => mapped.push('-'),
-            _ => mapped.push(c),
+            c => push_punctuation(&mut mapped, c),
         }
     }
-    mapped.split_whitespace().collect::<Vec<_>>().join(" ")
+    collapse_whitespace(&mapped)
+}
+
+/// Like [`normalize`], but keeps accents and ligatures: "Acheté" and
+/// "acheté" fold the same, "achète" does not.
+pub fn fold_case(text: &str) -> String {
+    let mut mapped = String::with_capacity(text.len());
+    for c in text.nfc().collect::<String>().to_lowercase().chars() {
+        push_punctuation(&mut mapped, c);
+    }
+    collapse_whitespace(&mapped)
+}
+
+fn push_punctuation(out: &mut String, c: char) {
+    match c {
+        '’' | '‘' | 'ʼ' | '′' => out.push('\''),
+        '‐' | '‑' | '–' | '—' => out.push('-'),
+        _ => out.push(c),
+    }
+}
+
+fn collapse_whitespace(text: &str) -> String {
+    text.split_whitespace().collect::<Vec<_>>().join(" ")
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn fold_case_keeps_accents() {
+        assert_eq!(fold_case("Acheté"), "acheté");
+        assert_eq!(fold_case("Cœur d’artichaut"), "cœur d'artichaut");
+        assert_ne!(fold_case("acheté"), fold_case("achète"));
+    }
 
     #[test]
     fn shared_vectors() {

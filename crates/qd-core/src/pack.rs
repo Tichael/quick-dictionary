@@ -11,6 +11,7 @@ use rusqlite::{Connection, OpenFlags, OptionalExtension, params};
 
 use crate::Error;
 use crate::entry::{Entry, EntryData};
+use crate::spelling::{edit_distance, spelling_cost};
 
 pub const SCHEMA_VERSION: &str = "1";
 
@@ -52,7 +53,10 @@ pub struct Hit {
 #[derive(Debug, Clone)]
 pub struct KeyMatch {
     pub key: String,
+    /// Plain edits between the query and `key`.
     pub distance: u32,
+    /// Weighted cost of those edits, in half edits (see [`spelling_cost`]).
+    pub cost: u32,
     pub freq: u16,
 }
 
@@ -170,7 +174,8 @@ impl Pack {
             let candidate = String::from_utf8_lossy(candidate).into_owned();
             if candidate != key {
                 let distance = edit_distance(key, &candidate);
-                matches.push(KeyMatch { key: candidate, distance, freq: freq as u16 });
+                let cost = spelling_cost(key, &candidate);
+                matches.push(KeyMatch { key: candidate, distance, cost, freq: freq as u16 });
             }
         }
         Ok(matches)
@@ -184,6 +189,7 @@ impl Pack {
             matches.push(KeyMatch {
                 key: String::from_utf8_lossy(candidate).into_owned(),
                 distance: 0,
+                cost: 0,
                 freq: freq as u16,
             });
         }
@@ -229,33 +235,4 @@ fn save_key_index(file: &Path, stem: &str, bytes: &[u8]) -> std::io::Result<()> 
         }
     }
     Ok(())
-}
-
-/// Levenshtein distance between two strings, counted in characters.
-pub fn edit_distance(a: &str, b: &str) -> u32 {
-    let b: Vec<char> = b.chars().collect();
-    let mut row: Vec<u32> = (0..=b.len() as u32).collect();
-    for (i, ca) in a.chars().enumerate() {
-        let mut prev = row[0];
-        row[0] = i as u32 + 1;
-        for (j, &cb) in b.iter().enumerate() {
-            let cost = if ca == cb { prev } else { prev + 1 };
-            prev = row[j + 1];
-            row[j + 1] = cost.min(row[j] + 1).min(prev + 1);
-        }
-    }
-    row[b.len()]
-}
-
-#[cfg(test)]
-mod tests {
-    use super::edit_distance;
-
-    #[test]
-    fn distances() {
-        assert_eq!(edit_distance("acceuil", "accueil"), 2);
-        assert_eq!(edit_distance("ecole", "ecoles"), 1);
-        assert_eq!(edit_distance("", "abc"), 3);
-        assert_eq!(edit_distance("chat", "chat"), 0);
-    }
 }
