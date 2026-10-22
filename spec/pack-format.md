@@ -114,3 +114,37 @@ lancions` → `lancions`) and imperative suffixes (`abats-toi` → `abats`).
 Forms that still contain a space after that get no key. They are compound
 forms (`j'étais allé`, `more absolutely`), and their individual words are
 already listed.
+
+## Published packs
+
+The **Language packs** workflow publishes packs to the `packs` release of
+the repository, which always holds the latest version of each:
+
+- `<lang>.db.gz`: the pack, gzip-compressed;
+- `manifest.json`, written by `pipeline/qd_pipeline/release.py`:
+
+```json
+{
+  "manifest_version": 1,
+  "packs": [
+    {
+      "lang": "fr",
+      "lang_name": "Français",
+      "file": "fr.db.gz",
+      "size": 187795054,
+      "db_size": 298119168,
+      "sha256": "…",
+      "schema_version": "1",
+      "built_at": "2026-10-22T15:59:00+00:00",
+      "entries": 574853
+    }
+  ]
+}
+```
+
+`size` is the compressed file's size, used for download progress; `sha256`
+and `db_size` describe the unpacked pack, which the app checks before
+installing it. The app only offers packs whose `schema_version` it reads,
+and offers an update when `built_at` is newer than the installed pack's.
+The manifest is uploaded after the packs, so it never lists a file that is
+not there yet.

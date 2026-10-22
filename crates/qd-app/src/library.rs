@@ -132,24 +132,44 @@ impl Library {
     }
 
     /// Copies a pack file into the packs folder, as `<lang>.db`, replacing
-    /// an installed pack of the same language.
-    /// Error messages are in `ui`, the interface language.
+    /// an installed pack of the same language. Error messages are in `ui`,
+    /// the interface language.
     pub fn install(&self, source: &Path, ui: Lang) -> Result<String, String> {
+        // Copy first, so a large file never leaves the folder half-written.
+        let tmp = self.packs_dir.join(format!("{}.part", file_name(source)));
+        std::fs::create_dir_all(&self.packs_dir)
+            .and_then(|()| std::fs::copy(source, &tmp))
+            .map_err(|e| {
+                let _ = std::fs::remove_file(&tmp);
+                i18n::install_error(ui, source, e)
+            })?;
+        self.install_prepared(&tmp, ui)
+    }
+
+    /// The temporary file a download of `lang` writes to, in the packs
+    /// folder (so installing it is a rename, not a copy).
+    pub fn download_path(&self, lang: &str) -> Result<PathBuf, String> {
+        std::fs::create_dir_all(&self.packs_dir).map_err(|e| e.to_string())?;
+        Ok(self.packs_dir.join(format!("{lang}.db.download")))
+    }
+
+    /// Installs a pack file already written inside the packs folder (it is
+    /// moved, or deleted if it is not a usable pack). Returns its language.
+    pub fn install_prepared(&self, tmp: &Path, ui: Lang) -> Result<String, String> {
         // Opening it checks that it is a pack, and tells its language.
-        let lang = Pack::open(source, None)
-            .map_err(|e| i18n::not_a_pack(ui, source, e))?
-            .lang;
-        let target = self.packs_dir.join(format!("{lang}.db"));
-        let tmp = self.packs_dir.join(format!("{lang}.db.part"));
-        let install = || {
-            std::fs::create_dir_all(&self.packs_dir)?;
-            std::fs::copy(source, &tmp)?;
-            self.with_packs_closed(|| std::fs::rename(&tmp, &target))
+        let lang = match Pack::open(tmp, None) {
+            Ok(pack) => pack.lang,
+            Err(e) => {
+                let _ = std::fs::remove_file(tmp);
+                return Err(i18n::not_a_pack(ui, tmp, e));
+            }
         };
-        install().map_err(|e| {
-            let _ = std::fs::remove_file(&tmp);
-            i18n::install_error(ui, source, e)
-        })?;
+        let target = self.packs_dir.join(format!("{lang}.db"));
+        self.with_packs_closed(|| std::fs::rename(tmp, &target))
+            .map_err(|e| {
+                let _ = std::fs::remove_file(tmp);
+                i18n::install_error(ui, tmp, e)
+            })?;
         Ok(lang)
     }
 

@@ -91,3 +91,14 @@ input[type="number"] { width: 70px; }
 .pack.failed { border-color: var(--danger); }
 .empty { padding: 16px; text-align: center; border: 1px dashed var(--border); border-radius: var(--radius); color: var(--text-muted); }
 .actions { display: flex; gap: 8px; flex-wrap: wrap; margin: 12px 0; }
+
+h3 { font-size: 14px; margin: 20px 0 4px; }
+.pack .status { color: var(--text-muted); font-size: 13px; white-space: nowrap; }
+.progress {
+  width: 120px;
+  height: 6px;
+  border-radius: 3px;
+  background: var(--bg-hover);
+  overflow: hidden;
+}
+.progress > div { height: 100%; background: var(--accent); transition: width 0.2s; }

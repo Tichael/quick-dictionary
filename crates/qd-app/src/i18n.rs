@@ -130,6 +130,31 @@ pub fn remove_error(lang: Lang, file: &str, error: impl Display) -> String {
     }
 }
 
+pub fn manifest_error(lang: Lang, error: impl Display) -> String {
+    match lang {
+        Lang::En => format!("Could not get the list of dictionaries to download: {error}"),
+        Lang::Fr => {
+            format!("Impossible d’obtenir la liste des dictionnaires à télécharger : {error}")
+        }
+    }
+}
+
+pub fn download_error(lang: Lang, name: &str, error: impl Display) -> String {
+    match lang {
+        Lang::En => format!("Could not download the {name} dictionary: {error}"),
+        Lang::Fr => format!("Impossible de télécharger le dictionnaire {name} : {error}"),
+    }
+}
+
+pub fn checksum_error(lang: Lang, name: &str) -> String {
+    match lang {
+        Lang::En => format!("The {name} dictionary was damaged during the download. Try again."),
+        Lang::Fr => {
+            format!("Le dictionnaire {name} a été abîmé pendant le téléchargement. Réessayez.")
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

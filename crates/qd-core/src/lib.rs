@@ -15,7 +15,7 @@ use std::path::PathBuf;
 
 pub use entry::{Entry, FormGroup, Sense};
 pub use normalize::{fold_case, normalize};
-pub use pack::{KeyMatch, MatchKind, Pack};
+pub use pack::{KeyMatch, MatchKind, Pack, SCHEMA_VERSION};
 pub use search::{Dictionary, MatchedForm, SearchResult, Suggestion};
 pub use spelling::{edit_distance, spelling_cost};
 

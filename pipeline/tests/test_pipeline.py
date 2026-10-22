@@ -8,6 +8,7 @@ from pathlib import Path
 from qd_pipeline.build import KIND_FORM, KIND_FORM_OF, KIND_HEADWORD, KIND_REDIRECT, build, decode_data
 from qd_pipeline.languages import LANGUAGES
 from qd_pipeline.normalize import normalize
+from qd_pipeline.release import prepare
 from qd_pipeline.wordfreq import load_zipf
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -158,6 +159,31 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(self.find(conn, "geese"), [("goose", "noun", KIND_FORM_OF)])
         (note,) = conn.execute("SELECT note FROM lookup WHERE key = 'geese'").fetchone()
         self.assertEqual(note, "plural of goose")
+
+
+class ReleaseTest(unittest.TestCase):
+    def test_compresses_packs_and_writes_a_manifest(self):
+        import hashlib
+
+        tmp = Path(tempfile.mkdtemp())
+        packs = []
+        for lang in ("fr", "en"):
+            build([FIXTURES / f"{lang}-sample.jsonl"], lang, tmp / f"{lang}.db")
+            packs.append(tmp / f"{lang}.db")
+        manifest = prepare(packs, tmp / "release")
+
+        written = json.loads((tmp / "release" / "manifest.json").read_text("utf-8"))
+        self.assertEqual(written, manifest)
+        self.assertEqual([p["lang"] for p in manifest["packs"]], ["en", "fr"])
+        fr = manifest["packs"][1]
+        self.assertEqual(fr["file"], "fr.db.gz")
+        self.assertEqual(fr["lang_name"], "Français")
+        self.assertEqual(fr["entries"], 7)
+        self.assertEqual(fr["schema_version"], "1")
+        # The checksum is of the pack itself, as the app checks it after unpacking.
+        unpacked = gzip.decompress((tmp / "release" / "fr.db.gz").read_bytes())
+        self.assertEqual(hashlib.sha256(unpacked).hexdigest(), fr["sha256"])
+        self.assertEqual(len(unpacked), fr["db_size"])
 
 
 if __name__ == "__main__":

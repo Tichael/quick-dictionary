@@ -4,10 +4,12 @@
 // No console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod downloads;
 mod i18n;
 mod library;
 mod settings;
 
+use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Mutex;
 
@@ -36,6 +38,8 @@ struct AppState {
     settings_file: PathBuf,
     /// The tray menu's items, relabeled when the interface language changes.
     tray_items: Mutex<Vec<(MenuItem<Wry>, Text)>>,
+    /// Languages being downloaded, so a pack is not downloaded twice at once.
+    downloading: Mutex<HashSet<String>>,
 }
 
 fn settings(app: &AppHandle) -> Settings {
@@ -297,6 +301,58 @@ async fn remove_pack(file: String, app: AppHandle) -> Result<bool, String> {
     Ok(true)
 }
 
+/// The packs published for download.
+#[tauri::command]
+async fn available_packs(app: AppHandle) -> Result<Vec<downloads::RemotePack>, String> {
+    downloads::available(&downloads::base_url(), ui_lang(&app))
+}
+
+#[derive(Clone, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DownloadProgress {
+    lang: String,
+    received: u64,
+    total: u64,
+}
+
+/// Downloads a published pack and installs it, replacing an older version.
+/// Sends "download-progress" events while downloading.
+#[tauri::command]
+async fn download_pack(lang: String, app: AppHandle) -> Result<(), String> {
+    let ui = ui_lang(&app);
+    let state = app.state::<AppState>();
+    if !state.downloading.lock().unwrap().insert(lang.clone()) {
+        return Ok(()); // already on its way
+    }
+    let result = (|| {
+        let base = downloads::base_url();
+        let pack = downloads::available(&base, ui)?
+            .into_iter()
+            .find(|p| p.lang == lang)
+            .ok_or_else(|| i18n::manifest_error(ui, format!("no {lang} pack")))?;
+        let dest = state.library.download_path(&lang)?;
+        let (events, event_lang, total) = (app.clone(), lang.clone(), pack.size);
+        let mut last_percent = None;
+        downloads::download(&base, &pack, &dest, ui, move |received| {
+            // One event per percent is plenty for a progress bar.
+            let percent = received * 100 / total.max(1);
+            if last_percent != Some(percent) {
+                last_percent = Some(percent);
+                let progress = DownloadProgress {
+                    lang: event_lang.clone(),
+                    received,
+                    total,
+                };
+                let _ = events.emit("download-progress", progress);
+            }
+        })?;
+        state.library.install_prepared(&dest, ui)
+    })();
+    state.downloading.lock().unwrap().remove(&lang);
+    let _ = app.emit("library-changed", ());
+    result.map(|_| ())
+}
+
 #[tauri::command]
 async fn reload_packs(app: AppHandle) -> Result<(), String> {
     let result = app.state::<AppState>().library.reload();
@@ -413,6 +469,7 @@ fn main() {
                 settings: Mutex::new(settings),
                 settings_file,
                 tray_items: Mutex::new(Vec::new()),
+                downloading: Mutex::new(HashSet::new()),
             });
             create_lookup(&handle)?;
             setup_tray(&handle)?;
@@ -459,6 +516,8 @@ fn main() {
             open_packs_folder,
             open_url,
             log_error,
+            available_packs,
+            download_pack,
         ])
         .build(tauri::generate_context!())
         .expect("building the app")

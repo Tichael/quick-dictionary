@@ -6,8 +6,10 @@ definitions and, for verbs, its full conjugation. Every installed language
 is searched at once, so there's nothing to switch.
 
 Status: early, but usable. The data pipeline, the search core and a first
-version of the desktop app (Tauri, Windows first) work. Dictionaries are not
-downloadable yet: build them with the pipeline below.
+version of the desktop app (Tauri, Windows first) work. The app downloads its
+dictionaries from this repository's
+[`packs` release](https://github.com/Tichael/quick-dictionary/releases/tag/packs),
+which a workflow rebuilds every month.
 
 ## Repository layout
 
@@ -48,6 +50,13 @@ python -m qd_pipeline.build --lang en raw/en-English.jsonl --freq raw/large_en.m
 
 Each build takes a few minutes and produces a pack of about 250–300 MB.
 
+To publish packs where the app downloads them, `qd_pipeline.release`
+compresses them and writes the manifest the app reads:
+
+```sh
+python -m qd_pipeline.release ../packs/fr.db ../packs/en.db -o ../release
+```
+
 Check a pack's contents, or look up words the way the app will:
 
 ```sh
@@ -78,10 +87,13 @@ cargo run -p quick-dictionary
 ```
 
 The first launch opens the settings window so you can add dictionaries:
-click **Add a dictionary file…** and pick a pack (`fr.db`, `en.db`). The app
-copies it into its data folder (`%APPDATA%\io.github.tichael.quickdictionary\packs`
-on Windows). For development, `QD_PACKS=path/to/packs` makes the app use
-another folder instead.
+**Download** them from the list, or click **Add a dictionary file…** and pick
+a pack you built (`fr.db`, `en.db`). Packs are kept in the app's data folder
+(`%APPDATA%\io.github.tichael.quickdictionary\packs` on Windows).
+
+For development, `QD_PACKS=path/to/packs` makes the app use another folder,
+and `QD_PACKS_URL=http://…/` another download location: serve a folder made
+by `python -m qd_pipeline.release` (see above).
 
 Debug builds open a console window that shows the app's log, including script
 errors from the windows. They don't register themselves to start at login
@@ -115,16 +127,20 @@ second, and caches it in `packs/.cache`.
 
 ## Continuous integration
 
-GitHub Actions runs two workflows (in `.github/workflows/`):
+GitHub Actions runs three workflows (in `.github/workflows/`):
 
 - **CI**, on every pull request and push to `main`: the pipeline tests, the
-  interface strings check, `cargo fmt`, Clippy and the Rust tests on Linux,
-  and a Windows build. The Windows job
-  uploads the installer and the plain `.exe` as the
-  `quick-dictionary-windows` artifact, downloadable from the run's page.
-- **Language packs**, run by hand from the Actions tab or when `pipeline/`
-  changes: downloads the latest Wiktionary extracts and builds `fr.db` and
-  `en.db`, uploaded as the `pack-fr` and `pack-en` artifacts (kept 30 days).
+  interface strings check, `cargo fmt`, Clippy and the Rust tests on Linux.
+- **Windows build**, on pull requests and pushes to `main` that change the
+  Rust code or the app (Windows minutes cost twice Linux minutes on private
+  repositories), or by hand: builds the app and uploads the installer and
+  the plain `.exe` as the `quick-dictionary-windows` artifact.
+- **Language packs**, once a month or by hand from the Actions tab: builds
+  `fr.db` and `en.db` from the latest Wiktionary extracts and publishes them,
+  compressed, with a `manifest.json` to the `packs` release (about 12 minutes).
+
+The app downloads release files without signing in, which only works while
+the repository is public.
 
 ## Tests
 

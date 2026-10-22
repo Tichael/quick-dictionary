@@ -105,8 +105,13 @@ function formatDate(iso) {
   return Number.isNaN(date.getTime()) ? iso.slice(0, 10) : date.toLocaleDateString(uiLang(), { dateStyle: "medium" });
 }
 
+// Installed packs by language, for the download list ("up to date"…).
+let installed = new Map();
+
 async function showPacks() {
   const info = await invoke("library_info");
+  installed = new Map(info.packs.map((p) => [p.lang, p]));
+  renderDownloads();
   const packsEl = document.getElementById("packs");
   document.getElementById("packs-dir").innerHTML = t("dictionaries.folder", { dir: `<code>${esc(info.dir)}</code>` });
   if (info.loading) {
@@ -163,6 +168,89 @@ document.getElementById("packs").addEventListener("click", (event) => {
   if (button) run(() => invoke("remove_pack", { file: button.dataset.file }), "");
 });
 
+// --- Downloads -----------------------------------------------------------
+
+const downloadsEl = document.getElementById("downloads");
+let remote = null; // the published packs, once fetched
+let remoteError = null;
+const progress = new Map(); // lang -> percent, while downloading
+
+async function checkDownloads() {
+  remote = null;
+  remoteError = null;
+  renderDownloads();
+  try {
+    remote = await invoke("available_packs");
+  } catch (error) {
+    remoteError = String(error);
+  }
+  renderDownloads();
+}
+
+function downloadAction(pack) {
+  if (progress.has(pack.lang)) {
+    const percent = progress.get(pack.lang);
+    const label = percent >= 100 ? t("dictionaries.installingDownload") : t("dictionaries.downloading", { percent });
+    return `<div class="status">${esc(label)}<div class="progress"><div style="width: ${percent}%"></div></div></div>`;
+  }
+  const mine = installed.get(pack.lang);
+  if (mine && mine.builtAt >= pack.builtAt) {
+    return `<span class="status">${esc(t("dictionaries.upToDate"))}</span>`;
+  }
+  const label = t(mine ? "dictionaries.update" : "dictionaries.download");
+  return `<button class="download primary" data-lang="${esc(pack.lang)}">${esc(label)}</button>`;
+}
+
+function renderDownloads() {
+  if (remoteError) {
+    downloadsEl.innerHTML = `<p class="hint error">${esc(remoteError)}</p>`;
+  } else if (remote === null) {
+    downloadsEl.innerHTML = `<p class="hint">${esc(t("dictionaries.checking"))}</p>`;
+  } else if (!remote.length) {
+    downloadsEl.innerHTML = `<p class="hint">${esc(t("dictionaries.noneAvailable"))}</p>`;
+  } else {
+    downloadsEl.innerHTML = remote.map((p) => `
+      <div class="pack">
+        <span class="badge">${esc(p.lang.toUpperCase())}</span>
+        <div class="details">
+          <div class="name">${esc(p.langName)}</div>
+          <div class="hint">${esc(t("dictionaries.remoteInfo", {
+            entries: p.entries.toLocaleString(uiLang()),
+            size: formatSize(p.size),
+            date: formatDate(p.builtAt),
+          }))}</div>
+        </div>
+        ${downloadAction(p)}
+      </div>`).join("");
+  }
+}
+
+downloadsEl.addEventListener("click", async (event) => {
+  const button = event.target.closest(".download");
+  if (!button) return;
+  const lang = button.dataset.lang;
+  progress.set(lang, 0);
+  renderDownloads();
+  try {
+    await invoke("download_pack", { lang });
+    showMessage("");
+  } catch (error) {
+    showMessage(String(error));
+  } finally {
+    progress.delete(lang);
+    showPacks();
+  }
+});
+
+document.getElementById("check-downloads").addEventListener("click", checkDownloads);
+
+await listen("download-progress", (event) => {
+  const { lang, received, total } = event.payload;
+  if (!progress.has(lang)) return;
+  progress.set(lang, Math.min(100, Math.floor((received * 100) / Math.max(total, 1))));
+  renderDownloads();
+});
+
 // --- Navigation ----------------------------------------------------------
 
 // External links open in the browser, not in this window.
@@ -212,3 +300,4 @@ await listen("settings-changed", async (event) => {
 
 fill();
 showPacks();
+checkDownloads();
