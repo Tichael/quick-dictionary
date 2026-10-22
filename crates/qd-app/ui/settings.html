@@ -8,96 +8,98 @@
   <link rel="stylesheet" href="settings.css">
 </head>
 <body>
+  <!-- Texts are replaced by the interface language's (see i18n.js). -->
   <nav>
-    <a href="#general" class="current">General</a>
-    <a href="#behavior">Behavior</a>
-    <a href="#dictionaries">Dictionaries</a>
-    <a href="#about">About</a>
+    <a href="#general" class="current" data-i18n="nav.general">General</a>
+    <a href="#behavior" data-i18n="nav.behavior">Behavior</a>
+    <a href="#dictionaries" data-i18n="nav.dictionaries">Dictionaries</a>
+    <a href="#about" data-i18n="nav.about">About</a>
   </nav>
   <main>
     <div id="message" hidden></div>
 
     <section id="general">
-      <h2>General</h2>
+      <h2 data-i18n="general.title">General</h2>
       <div class="row">
         <div>
-          <div class="label">Shortcut</div>
-          <div class="hint">Opens the lookup window from anywhere. Press it again to hide the window.</div>
+          <div class="label" data-i18n="general.shortcut">Shortcut</div>
+          <div class="hint" data-i18n="general.shortcutHint"></div>
         </div>
-        <button id="shortcut" class="shortcut" title="Click, then press the new shortcut"></button>
+        <button id="shortcut" class="shortcut" data-i18n-title="general.shortcutButton"></button>
       </div>
       <label class="row">
         <div>
-          <div class="label">Start with the system</div>
-          <div class="hint">Runs Quick Dictionary in the tray when you log in, so the shortcut always works.</div>
+          <div class="label" data-i18n="general.startWithSystem">Start with the system</div>
+          <div class="hint" data-i18n="general.startWithSystemHint"></div>
         </div>
         <input type="checkbox" data-setting="startWithSystem">
+      </label>
+      <label class="row">
+        <div>
+          <div class="label" data-i18n="general.language">Interface language</div>
+          <div class="hint" data-i18n="general.languageHint"></div>
+        </div>
+        <select data-setting="language">
+          <option value="system" data-i18n="general.languageSystem">Same as the system</option>
+          <option value="en">English</option>
+          <option value="fr">Français</option>
+        </select>
       </label>
     </section>
 
     <section id="behavior">
-      <h2>Behavior</h2>
+      <h2 data-i18n="behavior.title">Behavior</h2>
       <label class="row">
         <div>
-          <div class="label">Hide when the window loses focus</div>
-          <div class="hint">Clicking elsewhere closes the lookup window, like a menu.</div>
+          <div class="label" data-i18n="behavior.hideOnBlur">Hide when the window loses focus</div>
+          <div class="hint" data-i18n="behavior.hideOnBlurHint"></div>
         </div>
         <input type="checkbox" data-setting="hideOnBlur">
       </label>
       <label class="row">
         <div>
-          <div class="label">Start with an empty search</div>
-          <div class="hint">Otherwise the last word stays, selected, so typing replaces it.</div>
+          <div class="label" data-i18n="behavior.clearOnShow">Start with an empty search</div>
+          <div class="hint" data-i18n="behavior.clearOnShowHint"></div>
         </div>
         <input type="checkbox" data-setting="clearOnShow">
       </label>
       <label class="row">
-        <div class="label">Window position</div>
+        <div class="label" data-i18n="behavior.position">Window position</div>
         <select data-setting="position">
-          <option value="center">Center of the screen</option>
-          <option value="remember">Where I last moved it</option>
+          <option value="center" data-i18n="behavior.positionCenter">Center of the screen</option>
+          <option value="remember" data-i18n="behavior.positionRemember">Where I last moved it</option>
         </select>
       </label>
       <label class="row">
-        <div class="label">Theme</div>
+        <div class="label" data-i18n="behavior.theme">Theme</div>
         <select data-setting="theme">
-          <option value="system">Same as the system</option>
-          <option value="light">Light</option>
-          <option value="dark">Dark</option>
+          <option value="system" data-i18n="behavior.themeSystem">Same as the system</option>
+          <option value="light" data-i18n="behavior.themeLight">Light</option>
+          <option value="dark" data-i18n="behavior.themeDark">Dark</option>
         </select>
       </label>
       <label class="row">
-        <div class="label">Results per search</div>
+        <div class="label" data-i18n="behavior.maxResults">Results per search</div>
         <input type="number" min="1" max="50" data-setting="maxResults">
       </label>
     </section>
 
     <section id="dictionaries">
-      <h2>Dictionaries</h2>
-      <p class="hint">
-        Every installed dictionary is searched at once. A dictionary is a language pack file
-        (<code>fr.db</code>, <code>en.db</code>…), built from Wiktionary with the tools in the
-        project's <code>pipeline</code> folder.
-      </p>
+      <h2 data-i18n="dictionaries.title">Dictionaries</h2>
+      <p class="hint" data-i18n-html="dictionaries.hint"></p>
       <div id="packs"></div>
       <div class="actions">
-        <button id="add-pack" class="primary">Add a dictionary file…</button>
-        <button id="open-folder">Open the dictionaries folder</button>
-        <button id="reload">Reload</button>
+        <button id="add-pack" class="primary" data-i18n="dictionaries.add">Add a dictionary file…</button>
+        <button id="open-folder" data-i18n="dictionaries.openFolder">Open the dictionaries folder</button>
+        <button id="reload" data-i18n="dictionaries.reload">Reload</button>
       </div>
       <p class="hint" id="packs-dir"></p>
     </section>
 
     <section id="about">
-      <h2>About</h2>
-      <p>Quick Dictionary 0.1.0 — an offline dictionary and conjugator.</p>
-      <p class="hint">
-        The code is MIT-licensed. Dictionary text comes from
-        <a href="https://www.wiktionary.org/">Wiktionary</a> contributors, via
-        <a href="https://kaikki.org/">wiktextract and kaikki.org</a>; word frequencies come from
-        <a href="https://github.com/rspeer/wordfreq">wordfreq</a>. Both are licensed
-        <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA 4.0</a>.
-      </p>
+      <h2 data-i18n="about.title">About</h2>
+      <p id="version"></p>
+      <p class="hint" data-i18n-html="about.licenses"></p>
     </section>
   </main>
   <script type="module" src="errors.js"></script>

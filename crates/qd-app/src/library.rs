@@ -8,6 +8,8 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use qd_core::{Dictionary, Pack, SearchResult, Suggestion};
 use serde::Serialize;
 
+use crate::i18n::{self, Lang};
+
 pub struct Library {
     pub packs_dir: PathBuf,
     cache_dir: PathBuf,
@@ -131,34 +133,37 @@ impl Library {
 
     /// Copies a pack file into the packs folder, as `<lang>.db`, replacing
     /// an installed pack of the same language.
-    pub fn install(&self, source: &Path) -> Result<String, String> {
+    /// Error messages are in `ui`, the interface language.
+    pub fn install(&self, source: &Path, ui: Lang) -> Result<String, String> {
         // Opening it checks that it is a pack, and tells its language.
         let lang = Pack::open(source, None)
-            .map_err(|e| format!("{} is not a usable language pack: {e}", source.display()))?
+            .map_err(|e| i18n::not_a_pack(ui, source, e))?
             .lang;
         let target = self.packs_dir.join(format!("{lang}.db"));
         let tmp = self.packs_dir.join(format!("{lang}.db.part"));
-        std::fs::create_dir_all(&self.packs_dir).map_err(|e| e.to_string())?;
-        std::fs::copy(source, &tmp).map_err(|e| format!("copying {}: {e}", source.display()))?;
-        self.with_packs_closed(|| std::fs::rename(&tmp, &target))
-            .map_err(|e| format!("installing {}: {e}", target.display()))?;
+        let install = || {
+            std::fs::create_dir_all(&self.packs_dir)?;
+            std::fs::copy(source, &tmp)?;
+            self.with_packs_closed(|| std::fs::rename(&tmp, &target))
+        };
+        install().map_err(|e| {
+            let _ = std::fs::remove_file(&tmp);
+            i18n::install_error(ui, source, e)
+        })?;
         Ok(lang)
     }
 
-    /// Deletes an installed pack file.
-    pub fn remove(&self, file: &str) -> Result<(), String> {
+    /// Deletes an installed pack file. Error messages are in `ui`.
+    pub fn remove(&self, file: &str, ui: Lang) -> Result<(), String> {
         let path = self.packs_dir.join(file);
         // Only plain file names inside the packs folder.
         if path.parent() != Some(self.packs_dir.as_path())
             || path.extension().is_none_or(|e| e != "db")
         {
-            return Err(format!(
-                "{file} is not a pack in {}",
-                self.packs_dir.display()
-            ));
+            return Err(i18n::not_installed(ui, file));
         }
         self.with_packs_closed(|| std::fs::remove_file(&path))
-            .map_err(|e| format!("removing {file}: {e}"))
+            .map_err(|e| i18n::remove_error(ui, file, e))
     }
 
     /// Runs `change` with every pack closed (Windows cannot replace or

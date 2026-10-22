@@ -1,7 +1,10 @@
 // Renders search results (see qd_core::SearchResult) as HTML.
 //
 // Labels for parts of speech, tags and tenses are shown in the entry's own
-// language: French entries get French tense names ("Passé simple").
+// language: French entries get French tense names ("Passé simple"). The rest
+// (headings, buttons) follows the interface language.
+
+import { t } from "./i18n.js";
 
 export function esc(text) {
   return String(text ?? "").replace(/[&<>"']/g, (c) => ({
@@ -180,7 +183,8 @@ function frenchConjugation(entry, matched) {
   if (tenses.size < 4) return null;
 
   const aux = tenses.get(key("infinitive past"))?.forms[0]?.split(" ")[0];
-  let html = `<h4>Conjugaison${aux ? ` <span class="faint">· auxiliaire ${esc(aux)}</span>` : ""}</h4>`;
+  const auxLabel = aux ? ` <span class="faint">· ${esc(t("entry.auxiliary", { aux }))}</span>` : "";
+  let html = `<h4>${esc(t("entry.conjugation"))}${auxLabel}</h4>`;
   for (const [mood, list] of FR_CONJUGATION) {
     const tiles = list
       .filter(([k]) => tenses.has(key(k)))
@@ -193,8 +197,8 @@ function frenchConjugation(entry, matched) {
       .join("");
     if (tiles) html += `<div class="mood"><div class="mood-name">${esc(mood)}</div><div class="tenses">${tiles}</div></div>`;
   }
-  html += `<button class="link toggle-compound">Afficher les temps composés</button>`;
-  html += otherForms("fr", other, matched, "Autres formes");
+  html += `<button class="link toggle-compound">${esc(t("entry.showCompound"))}</button>`;
+  html += otherForms("fr", other, matched, t("entry.otherForms"));
   return html;
 }
 
@@ -208,9 +212,10 @@ function englishVerb(entry, matched) {
       .map(([k, label]) => [label, tenses.get(key(k)).forms]))
     .map(([label, forms]) => `<tr><th>${esc(label)}</th><td>${forms.map((f) => mark(f, matched)).join(", ")}</td></tr>`)
     .join("");
-  let html = `<h4>Conjugation</h4><table class="forms">${rows}</table>`;
+  let html = `<h4>${esc(t("entry.conjugation"))}</h4><table class="forms">${rows}</table>`;
   if (other.length) {
-    html += `<details><summary>Other forms (${other.length})</summary>${otherForms("en", other, matched, "")}</details>`;
+    const summary = esc(t("entry.otherFormsCount", { n: other.length }));
+    html += `<details><summary>${summary}</summary>${otherForms("en", other, matched, "")}</details>`;
   }
   return html;
 }
@@ -223,7 +228,7 @@ function formsSection(result) {
     const html = lang === "fr" ? frenchConjugation(entry, matched) : lang === "en" ? englishVerb(entry, matched) : null;
     if (html) return `<section class="conjugation">${html}</section>`;
   }
-  return `<section>${otherForms(lang, entry.forms, matched, lang === "fr" ? "Formes" : "Forms")}</section>`;
+  return `<section>${otherForms(lang, entry.forms, matched, t("entry.forms"))}</section>`;
 }
 
 const SENSES_SHOWN = 6;
@@ -253,7 +258,7 @@ function sensesSection(result) {
   });
   if (!items.length) return "";
   const more = entry.senses.length > SENSES_SHOWN
-    ? `<button class="link toggle-senses">${lang === "fr" ? "Voir les" : "Show all"} ${entry.senses.length} ${lang === "fr" ? "définitions" : "definitions"}</button>`
+    ? `<button class="link toggle-senses">${esc(t("entry.showAllSenses", { n: entry.senses.length }))}</button>`
     : "";
   return `<ol class="senses">${items.join("")}</ol>${more}`;
 }
@@ -280,7 +285,7 @@ function header(result) {
   const pos = POS[lang]?.[entry.pos] ?? entry.pos;
   const tags = entry.tags.filter((t) => t !== "form-of" && t !== "alt-of").map((t) => tagLabel(lang, t));
   return `<div class="head">
-    <button class="word copy" title="Copy" data-word="${esc(entry.word)}">${esc(entry.word)}</button>
+    <button class="word copy" title="${esc(t("entry.copy"))}" data-word="${esc(entry.word)}">${esc(entry.word)}</button>
     <span class="pos">${esc([pos, ...tags].join(", "))}</span>
     ${entry.ipa ? `<span class="ipa">${esc(entry.ipa)}</span>` : ""}
     <span class="lang" title="${esc(result.lang_name)}">${esc(lang.toUpperCase())}</span>

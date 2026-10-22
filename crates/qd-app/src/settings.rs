@@ -18,6 +18,8 @@ pub struct Settings {
     pub clear_on_show: bool,
     pub position: WindowPosition,
     pub theme: Theme,
+    /// Language of the app's own text (not of the dictionaries).
+    pub language: Language,
     /// How many results to show for a query.
     pub max_results: usize,
 }
@@ -29,6 +31,15 @@ pub enum WindowPosition {
     Center,
     /// Open the lookup window where it was last moved.
     Remember,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum Language {
+    /// The system's display language, if supported; otherwise English.
+    System,
+    En,
+    Fr,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
@@ -48,6 +59,7 @@ impl Default for Settings {
             clear_on_show: false,
             position: WindowPosition::Center,
             theme: Theme::System,
+            language: Language::System,
             max_results: 12,
         }
     }

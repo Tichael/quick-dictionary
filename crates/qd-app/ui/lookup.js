@@ -1,4 +1,5 @@
 import { esc, renderResult } from "./entry.js";
+import { loadLanguage, t } from "./i18n.js";
 import { applyTheme } from "./theme.js";
 
 const { invoke } = window.__TAURI__.core;
@@ -13,6 +14,7 @@ const toastEl = document.getElementById("toast");
 // Defaults keep the window usable if the settings cannot be read.
 let settings = await invoke("get_settings").catch(() => ({ theme: "system", clearOnShow: false }));
 applyTheme(settings.theme);
+await loadLanguage();
 
 let results = [];
 let selected = 0;
@@ -48,17 +50,18 @@ function render(response, query) {
   if (response?.error) {
     notice = `<span class="error">${esc(response.error)}</span>`;
   } else if (response?.noPacks) {
-    notice = `No dictionary is installed yet. <button class="link" id="open-dictionaries">Add one in the settings</button>.`;
+    notice = t("lookup.noPacks");
   } else if (response?.loading) {
-    notice = "Opening dictionaries…";
+    notice = esc(t("lookup.loading"));
   } else if (response && !results.length) {
-    notice = `No match for “${esc(query)}”.`;
+    notice = t("lookup.noMatch", { query: esc(query) });
   } else if (results[0]?.distance > 0) {
     const spellings = [...new Set(results.map((r) => r.matched_form?.form ?? r.entry.word))];
-    notice = `No exact match for “${esc(query)}”. Did you mean ${spellings
+    const words = spellings
       .slice(0, 5)
       .map((s) => `<button class="link lookup-word" data-word="${esc(s)}">${esc(s)}</button>`)
-      .join(", ")}?`;
+      .join(", ");
+    notice = t("lookup.didYouMean", { query: esc(query), words });
   }
   noticeEl.innerHTML = notice;
 
@@ -126,9 +129,9 @@ document.addEventListener("keydown", (event) => {
 async function copy(word) {
   try {
     await navigator.clipboard.writeText(word);
-    toast(`Copied “${word}”`);
+    toast(t("lookup.copied", { word }));
   } catch {
-    toast("Could not copy");
+    toast(t("lookup.copyFailed"));
   }
 }
 
@@ -163,9 +166,10 @@ await listen("lookup-shown", () => {
   input.select();
 });
 
-await listen("settings-changed", (event) => {
+await listen("settings-changed", async (event) => {
   settings = event.payload;
   applyTheme(settings.theme);
+  await loadLanguage();
   search();
 });
 

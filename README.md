@@ -61,7 +61,12 @@ The app lives in the tray. Press **Ctrl+Alt+D** (configurable) anywhere to
 open the lookup window and type a word. Esc hides the window, ↑/↓ move between
 results, Enter copies the selected word, and clicking a headword copies it too.
 The tray menu also opens the settings window: shortcut, start with the system,
-window behavior, theme, and the installed dictionaries.
+interface language (English or French, or the system's), window behavior,
+theme, and the installed dictionaries.
+
+To translate the app into another language, add a block of strings to
+`crates/qd-app/ui/i18n.js` and `crates/qd-app/src/i18n.rs`, and an option to
+the language list in `ui/settings.html`.
 
 ### Running it
 
@@ -112,8 +117,9 @@ second, and caches it in `packs/.cache`.
 
 GitHub Actions runs two workflows (in `.github/workflows/`):
 
-- **CI**, on every push and pull request: the pipeline tests, `cargo fmt`,
-  Clippy and the Rust tests on Linux, and a Windows build. The Windows job
+- **CI**, on every pull request and push to `main`: the pipeline tests, the
+  interface strings check, `cargo fmt`, Clippy and the Rust tests on Linux,
+  and a Windows build. The Windows job
   uploads the installer and the plain `.exe` as the
   `quick-dictionary-windows` artifact, downloadable from the run's page.
 - **Language packs**, run by hand from the Actions tab or when `pipeline/`
@@ -125,6 +131,7 @@ GitHub Actions runs two workflows (in `.github/workflows/`):
 ```sh
 cd pipeline && python -m unittest   # pipeline
 cargo test                          # search core and app, from the repository root
+node --test crates/qd-app/ui-tests/*.test.mjs   # interface strings
 ```
 
 The Rust tests search small packs in `crates/qd-core/tests/packs`, built by

@@ -8,6 +8,7 @@ license.workspace = true
 qd-core = { version = "0.1.0", path = "../qd-core" }
 serde = { version = "1.0.229", features = ["derive"] }
 serde_json = "1.0.154"
+sys-locale = "0.3.2"
 tauri = { version = "2.12.5", features = ["tray-icon"] }
 tauri-plugin-autostart = "2.7.0"
 tauri-plugin-dialog = "2.8.3"

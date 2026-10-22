@@ -4,6 +4,7 @@
 // No console window on Windows release builds.
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+mod i18n;
 mod library;
 mod settings;
 
@@ -14,12 +15,15 @@ use qd_core::{SearchResult, Suggestion};
 use serde::Serialize;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
-use tauri::{AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent};
+use tauri::{
+    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry,
+};
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
 use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use tauri_plugin_opener::OpenerExt;
 
+use i18n::{Lang, Text, text};
 use library::{Library, LibraryInfo};
 use settings::{Settings, WindowPosition, settings_file};
 
@@ -30,10 +34,28 @@ struct AppState {
     library: Library,
     settings: Mutex<Settings>,
     settings_file: PathBuf,
+    /// The tray menu's items, relabeled when the interface language changes.
+    tray_items: Mutex<Vec<(MenuItem<Wry>, Text)>>,
 }
 
 fn settings(app: &AppHandle) -> Settings {
     app.state::<AppState>().settings.lock().unwrap().clone()
+}
+
+/// The interface language now in use.
+fn ui_lang(app: &AppHandle) -> Lang {
+    Lang::resolve(settings(app).language)
+}
+
+/// Relabels what the app itself shows: tray menu and settings window title.
+fn apply_language(app: &AppHandle) {
+    let lang = ui_lang(app);
+    for (item, label) in app.state::<AppState>().tray_items.lock().unwrap().iter() {
+        let _ = item.set_text(text(lang, *label));
+    }
+    if let Some(window) = app.get_webview_window(SETTINGS) {
+        let _ = window.set_title(text(lang, Text::SettingsTitle));
+    }
 }
 
 // --- Windows -------------------------------------------------------------
@@ -90,7 +112,7 @@ fn show_settings(app: &AppHandle) {
         return;
     }
     let built = WebviewWindowBuilder::new(app, SETTINGS, WebviewUrl::App("settings.html".into()))
-        .title("Quick Dictionary — Settings")
+        .title(text(ui_lang(app), Text::SettingsTitle))
         .inner_size(680.0, 620.0)
         .min_inner_size(520.0, 400.0)
         .center()
@@ -104,7 +126,7 @@ fn show_settings(app: &AppHandle) {
 
 /// Replaces the registered global shortcut. On failure (an invalid or
 /// already-taken shortcut), the previous one stays registered.
-fn apply_shortcut(app: &AppHandle, old: Option<&str>, new: &str) -> Result<(), String> {
+fn apply_shortcut(app: &AppHandle, old: Option<&str>, new: &str, lang: Lang) -> Result<(), String> {
     let shortcuts = app.global_shortcut();
     if let Some(old) = old {
         let _ = shortcuts.unregister(old);
@@ -113,18 +135,18 @@ fn apply_shortcut(app: &AppHandle, old: Option<&str>, new: &str) -> Result<(), S
         if let Some(old) = old {
             let _ = shortcuts.register(old);
         }
-        format!("Could not use the shortcut “{new}”: {e}")
+        i18n::shortcut_error(lang, new, e)
     })
 }
 
-fn apply_autostart(app: &AppHandle, enabled: bool) -> Result<(), String> {
+fn apply_autostart(app: &AppHandle, enabled: bool, lang: Lang) -> Result<(), String> {
     let autostart = app.autolaunch();
     let result = match (enabled, autostart.is_enabled().unwrap_or(false)) {
         (true, false) => autostart.enable(),
         (false, true) => autostart.disable(),
         _ => Ok(()),
     };
-    result.map_err(|e| format!("Could not change “start with the system”: {e}"))
+    result.map_err(|e| i18n::autostart_error(lang, e))
 }
 
 // --- Commands called by the windows --------------------------------------
@@ -179,6 +201,13 @@ fn get_settings(state: State<AppState>) -> Settings {
     state.settings.lock().unwrap().clone()
 }
 
+/// The interface language code ("en", "fr"), with "same as the system"
+/// resolved.
+#[tauri::command]
+fn ui_language(app: AppHandle) -> &'static str {
+    ui_lang(&app).code()
+}
+
 /// Saves new settings and applies them. Returns the settings now in effect:
 /// if the shortcut could not be registered, the old one is kept.
 #[tauri::command]
@@ -190,23 +219,28 @@ fn save_settings(
     let old = state.settings.lock().unwrap().clone();
     let mut new = new;
     new.max_results = new.max_results.clamp(1, 50);
+    // Messages use the language being switched to.
+    let lang = Lang::resolve(new.language);
     let mut errors = Vec::new();
     if new.shortcut != old.shortcut
-        && let Err(e) = apply_shortcut(&app, Some(&old.shortcut), &new.shortcut)
+        && let Err(e) = apply_shortcut(&app, Some(&old.shortcut), &new.shortcut, lang)
     {
         errors.push(e);
         new.shortcut = old.shortcut.clone();
     }
     if new.start_with_system != old.start_with_system
-        && let Err(e) = apply_autostart(&app, new.start_with_system)
+        && let Err(e) = apply_autostart(&app, new.start_with_system, lang)
     {
         errors.push(e);
         new.start_with_system = old.start_with_system;
     }
     if let Err(e) = new.save(&state.settings_file) {
-        errors.push(format!("Could not save settings: {e}"));
+        errors.push(i18n::save_error(lang, e));
     }
     *state.settings.lock().unwrap() = new.clone();
+    if new.language != old.language {
+        apply_language(&app);
+    }
     let _ = app.emit("settings-changed", &new);
     if errors.is_empty() {
         Ok(new)
@@ -224,41 +258,41 @@ fn library_info(state: State<AppState>) -> LibraryInfo {
 /// None if the user cancelled.
 #[tauri::command]
 async fn add_pack(app: AppHandle) -> Result<Option<String>, String> {
+    let lang = ui_lang(&app);
     let picked = app
         .dialog()
         .file()
-        .set_title("Add a language pack")
-        .add_filter("Language packs", &["db"])
+        .set_title(text(lang, Text::AddPackTitle))
+        .add_filter(text(lang, Text::PackFilter), &["db"])
         .blocking_pick_file();
     let Some(picked) = picked else {
         return Ok(None);
     };
     let path = picked.into_path().map_err(|e| e.to_string())?;
-    let lang = app.state::<AppState>().library.install(&path)?;
+    let pack_lang = app.state::<AppState>().library.install(&path, lang)?;
     let _ = app.emit("library-changed", ());
-    Ok(Some(lang))
+    Ok(Some(pack_lang))
 }
 
 /// Asks for confirmation, then deletes an installed pack. Returns false if
 /// the user cancelled.
 #[tauri::command]
 async fn remove_pack(file: String, app: AppHandle) -> Result<bool, String> {
+    let lang = ui_lang(&app);
     let confirmed = app
         .dialog()
-        .message(format!(
-            "Remove the dictionary {file}? The file will be deleted."
-        ))
-        .title("Remove a dictionary")
+        .message(i18n::remove_question(lang, &file))
+        .title(text(lang, Text::RemoveTitle))
         .kind(MessageDialogKind::Warning)
         .buttons(MessageDialogButtons::OkCancelCustom(
-            "Remove".into(),
-            "Cancel".into(),
+            text(lang, Text::RemoveButton).into(),
+            text(lang, Text::Cancel).into(),
         ))
         .blocking_show();
     if !confirmed {
         return Ok(false);
     }
-    app.state::<AppState>().library.remove(&file)?;
+    app.state::<AppState>().library.remove(&file, lang)?;
     let _ = app.emit("library-changed", ());
     Ok(true)
 }
@@ -293,11 +327,19 @@ fn open_url(url: String, app: AppHandle) -> Result<(), String> {
 // --- Setup ---------------------------------------------------------------
 
 fn setup_tray(app: &AppHandle) -> tauri::Result<()> {
-    let lookup = MenuItem::with_id(app, "lookup", "Look up a word", true, None::<&str>)?;
-    let settings = MenuItem::with_id(app, "settings", "Settings…", true, None::<&str>)?;
-    let quit = MenuItem::with_id(app, "quit", "Quit", true, None::<&str>)?;
+    let lang = ui_lang(app);
+    let item =
+        |id: &str, label: Text| MenuItem::with_id(app, id, text(lang, label), true, None::<&str>);
+    let lookup = item("lookup", Text::TrayLookup)?;
+    let settings = item("settings", Text::TraySettings)?;
+    let quit = item("quit", Text::TrayQuit)?;
     let separator = PredefinedMenuItem::separator(app)?;
     let menu = Menu::with_items(app, &[&lookup, &settings, &separator, &quit])?;
+    *app.state::<AppState>().tray_items.lock().unwrap() = vec![
+        (lookup, Text::TrayLookup),
+        (settings, Text::TraySettings),
+        (quit, Text::TrayQuit),
+    ];
     TrayIconBuilder::with_id("main")
         .icon(app.default_window_icon().cloned().expect("bundled icon"))
         .tooltip("Quick Dictionary")
@@ -355,13 +397,14 @@ fn main() {
             let settings = Settings::load(&settings_file);
 
             let handle = app.handle().clone();
-            if let Err(e) = apply_shortcut(&handle, None, &settings.shortcut) {
+            let lang = Lang::resolve(settings.language);
+            if let Err(e) = apply_shortcut(&handle, None, &settings.shortcut, lang) {
                 eprintln!("{e}");
             }
             // Development builds would register themselves to start at login:
             // they only do so when the setting is changed explicitly.
             if !cfg!(debug_assertions)
-                && let Err(e) = apply_autostart(&handle, settings.start_with_system)
+                && let Err(e) = apply_autostart(&handle, settings.start_with_system, lang)
             {
                 eprintln!("{e}");
             }
@@ -369,6 +412,7 @@ fn main() {
                 library: Library::new(packs_dir, cache_dir),
                 settings: Mutex::new(settings),
                 settings_file,
+                tray_items: Mutex::new(Vec::new()),
             });
             create_lookup(&handle)?;
             setup_tray(&handle)?;
@@ -406,6 +450,7 @@ fn main() {
             hide_lookup,
             open_settings,
             get_settings,
+            ui_language,
             save_settings,
             library_info,
             add_pack,

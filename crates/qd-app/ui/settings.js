@@ -1,4 +1,5 @@
 import { esc } from "./entry.js";
+import { loadLanguage, t, uiLang } from "./i18n.js";
 import { applyTheme } from "./theme.js";
 
 const { invoke } = window.__TAURI__.core;
@@ -9,6 +10,8 @@ const shortcutButton = document.getElementById("shortcut");
 
 // Defaults keep the window usable if the settings cannot be read.
 let settings = await invoke("get_settings").catch(() => ({ theme: "system", clearOnShow: false }));
+await loadLanguage();
+const version = await window.__TAURI__.app.getVersion().catch(() => "");
 
 function showMessage(text, kind = "error") {
   messageEl.textContent = text;
@@ -18,6 +21,8 @@ function showMessage(text, kind = "error") {
 
 function fill() {
   applyTheme(settings.theme);
+  document.title = t("settings.title");
+  document.getElementById("version").textContent = t("about.version", { version });
   shortcutButton.textContent = settings.shortcut;
   for (const el of document.querySelectorAll("[data-setting]")) {
     const value = settings[el.dataset.setting];
@@ -59,7 +64,7 @@ let recording = false;
 shortcutButton.addEventListener("click", () => {
   recording = !recording;
   shortcutButton.classList.toggle("recording", recording);
-  shortcutButton.textContent = recording ? "Press a shortcut…" : settings.shortcut;
+  shortcutButton.textContent = recording ? t("general.shortcutRecording") : settings.shortcut;
 });
 
 document.addEventListener("keydown", (event) => {
@@ -79,7 +84,7 @@ document.addEventListener("keydown", (event) => {
   if (event.metaKey) parts.push("Super");
   const isFunctionKey = /^F\d+$/.test(event.code);
   if (!parts.some((p) => p !== "Shift") && !isFunctionKey) {
-    shortcutButton.textContent = "Add Ctrl, Alt or Win…";
+    shortcutButton.textContent = t("general.shortcutNeedsModifier");
     return;
   }
   parts.push(keyName(event.code));
@@ -91,15 +96,21 @@ document.addEventListener("keydown", (event) => {
 // --- Dictionaries --------------------------------------------------------
 
 function formatSize(bytes) {
-  return bytes > 1e9 ? `${(bytes / 1e9).toFixed(1)} GB` : `${Math.round(bytes / 1e6)} MB`;
+  const number = (n, digits) => n.toLocaleString(uiLang(), { maximumFractionDigits: digits });
+  return bytes > 1e9 ? t("size.gb", { n: number(bytes / 1e9, 1) }) : t("size.mb", { n: number(bytes / 1e6, 0) });
+}
+
+function formatDate(iso) {
+  const date = new Date(iso);
+  return Number.isNaN(date.getTime()) ? iso.slice(0, 10) : date.toLocaleDateString(uiLang(), { dateStyle: "medium" });
 }
 
 async function showPacks() {
   const info = await invoke("library_info");
   const packsEl = document.getElementById("packs");
-  document.getElementById("packs-dir").innerHTML = `Folder: <code>${esc(info.dir)}</code>`;
+  document.getElementById("packs-dir").innerHTML = t("dictionaries.folder", { dir: `<code>${esc(info.dir)}</code>` });
   if (info.loading) {
-    packsEl.innerHTML = `<div class="empty">Opening dictionaries…</div>`;
+    packsEl.innerHTML = `<div class="empty">${esc(t("dictionaries.loading"))}</div>`;
     return;
   }
   const packs = info.packs.map((p) => `
@@ -107,10 +118,14 @@ async function showPacks() {
       <span class="badge">${esc(p.lang.toUpperCase())}</span>
       <div class="details">
         <div class="name">${esc(p.langName)}</div>
-        <div class="hint">${p.entries.toLocaleString()} entries · ${formatSize(p.sizeBytes)} ·
-          built ${esc(p.builtAt.slice(0, 10))} · <code>${esc(p.file)}</code></div>
+        <div class="hint">${t("dictionaries.packInfo", {
+          entries: p.entries.toLocaleString(uiLang()),
+          size: esc(formatSize(p.sizeBytes)),
+          date: esc(formatDate(p.builtAt)),
+          file: `<code>${esc(p.file)}</code>`,
+        })}</div>
       </div>
-      <button class="remove" data-file="${esc(p.file)}">Remove</button>
+      <button class="remove" data-file="${esc(p.file)}">${esc(t("dictionaries.remove"))}</button>
     </div>`);
   const failed = info.failed.map((f) => `
     <div class="pack failed">
@@ -118,10 +133,10 @@ async function showPacks() {
         <div class="name">${esc(f.file)}</div>
         <div class="hint error">${esc(f.error)}</div>
       </div>
-      <button class="remove" data-file="${esc(f.file)}">Remove</button>
+      <button class="remove" data-file="${esc(f.file)}">${esc(t("dictionaries.remove"))}</button>
     </div>`);
   packsEl.innerHTML = packs.concat(failed).join("") ||
-    `<div class="empty">No dictionary installed. Add a language pack file to start looking words up.</div>`;
+    `<div class="empty">${esc(t("dictionaries.none"))}</div>`;
 }
 
 async function run(action, busyText) {
@@ -138,11 +153,11 @@ async function run(action, busyText) {
 }
 
 document.getElementById("add-pack").addEventListener("click", () =>
-  run(() => invoke("add_pack"), "Installing… (this can take a few seconds for a large dictionary)"));
+  run(() => invoke("add_pack"), t("dictionaries.installing")));
 document.getElementById("open-folder").addEventListener("click", () =>
   invoke("open_packs_folder").catch((e) => showMessage(String(e))));
 document.getElementById("reload").addEventListener("click", () =>
-  run(() => invoke("reload_packs"), "Reloading…"));
+  run(() => invoke("reload_packs"), t("dictionaries.reloading")));
 document.getElementById("packs").addEventListener("click", (event) => {
   const button = event.target.closest(".remove");
   if (button) run(() => invoke("remove_pack", { file: button.dataset.file }), "");
@@ -188,9 +203,11 @@ for (const a of navLinks) {
 }
 
 await listen("library-changed", showPacks);
-await listen("settings-changed", (event) => {
+await listen("settings-changed", async (event) => {
   settings = event.payload;
+  await loadLanguage();
   fill();
+  showPacks();
 });
 
 fill();
