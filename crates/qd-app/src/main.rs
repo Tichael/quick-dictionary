@@ -189,8 +189,15 @@ fn hide_lookup(app: AppHandle) {
     }
 }
 
+/// Async on purpose: a synchronous command runs on the main thread, and
+/// building a window from there deadlocks on Windows (WebView2), leaving a
+/// blank settings window and an app that can no longer close any window.
+/// The lookup window is hidden first: it stays on top and would cover it.
 #[tauri::command]
-fn open_settings(app: AppHandle) {
+async fn open_settings(app: AppHandle) {
+    if let Some(window) = app.get_webview_window(LOOKUP) {
+        let _ = window.hide();
+    }
     show_settings(&app);
 }
 
