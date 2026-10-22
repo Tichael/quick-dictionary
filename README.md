@@ -138,3 +138,7 @@ The pack schema is described in [`spec/pack-format.md`](spec/pack-format.md).
 The code is MIT-licensed (see `LICENSE`). Language packs contain text from
 Wiktionary and frequencies from wordfreq, and are licensed
 [CC BY-SA 4.0](https://creativecommons.org/licenses/by-sa/4.0/).
+
+## AI Usage
+
+Claude Code was used to make this project. If you don't like that, just don't use it.
