@@ -9,3 +9,4 @@
 {"word": "vide", "lang_code": "fr", "lang": "Français", "pos": "noun", "senses": []}
 {"title": "Ecole normale", "redirect": "école"}
 {"word": "chevals", "lang_code": "fr", "lang": "Français", "pos": "noun", "pos_title": "Forme de nom commun", "senses": [{"glosses": ["Pluriel de cheval (forme fautive)."], "form_of": [{"word": "cheval"}]}]}
+{"word": "accueil", "lang_code": "fr", "lang": "Français", "pos": "noun", "tags": ["masculine"], "senses": [{"glosses": ["Réception que l’on fait à quelqu’un."]}], "forms": [{"form": "accueils", "tags": ["plural"]}]}

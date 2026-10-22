@@ -1,3 +1,4 @@
+import gzip
 import json
 import sqlite3
 import tempfile
@@ -7,6 +8,7 @@ from pathlib import Path
 from qd_pipeline.build import KIND_FORM, KIND_FORM_OF, KIND_HEADWORD, KIND_REDIRECT, build, decode_data
 from qd_pipeline.languages import LANGUAGES
 from qd_pipeline.normalize import normalize
+from qd_pipeline.wordfreq import load_zipf
 
 ROOT = Path(__file__).resolve().parents[2]
 FIXTURES = Path(__file__).parent / "fixtures"
@@ -20,30 +22,51 @@ class NormalizeTest(unittest.TestCase):
                 self.assertEqual(normalize(raw), expected)
 
 
-class FrenchKeyTest(unittest.TestCase):
-    def test_strips_pronouns(self):
-        key = LANGUAGES["fr"]["form_key"]
-        cases = {
-            "je lance": "lance",
-            "j'aime": "aime",
-            "il/elle/on lance": "lance",
-            "que nous lancions": "lancions",
-            "qu'ils/elles lancent": "lancent",
-            "je m'abats": "abats",
-            "nous nous lavons": "lavons",
-            "abats-toi": "abats",
-            "lancer": "lancer",
-            "porte-monnaie": "porte-monnaie",
-        }
-        for form, expected in cases.items():
-            with self.subTest(form=form):
-                self.assertEqual(key(form), expected)
+def _msgpack(value) -> bytes:
+    """Encode the small msgpack subset wordfreq files use."""
+    if isinstance(value, str):
+        raw = value.encode("utf-8")
+        return (bytes([0xA0 | len(raw)]) if len(raw) < 32 else bytes([0xD9, len(raw)])) + raw
+    if isinstance(value, int):
+        return bytes([value])
+    if isinstance(value, list):
+        head = bytes([0x90 | len(value)]) if len(value) < 16 else bytes([0xDC]) + len(value).to_bytes(2, "big")
+        return head + b"".join(_msgpack(v) for v in value)
+    if isinstance(value, dict):
+        return bytes([0x80 | len(value)]) + b"".join(_msgpack(k) + _msgpack(v) for k, v in value.items())
+    raise TypeError(value)
+
+
+class WordfreqTest(unittest.TestCase):
+    def test_load_zipf(self):
+        buckets = [[] for _ in range(300)]
+        buckets[0] = ["de"]
+        buckets[200] = ["été"]
+        buckets[250] = ["ete", "cheval"]
+        path = Path(tempfile.mkdtemp()) / "large_fr.msgpack.gz"
+        path.write_bytes(gzip.compress(_msgpack([{"format": "cB", "version": 1}] + buckets)))
+        # "ete" keeps the value of the commoner "été".
+        self.assertEqual(load_zipf(path), {"de": 9.0, "ete": 7.0, "cheval": 6.5})
+
+
+class FormKeyTest(unittest.TestCase):
+    def test_shared_vectors(self):
+        vectors = json.loads((ROOT / "spec" / "form-key-vectors.json").read_text("utf-8"))
+        for lang, cases in vectors.items():
+            key = LANGUAGES[lang]["form_key"]
+            for form, expected in cases:
+                with self.subTest(lang=lang, form=form):
+                    self.assertEqual(key(form), expected)
 
 
 class BuildTest(unittest.TestCase):
+    ZIPF = {"go": 6.03, "went": 5.5, "lance": 4.2, "lancer": 4.5}
+
     def build_pack(self, lang: str) -> sqlite3.Connection:
         tmp = Path(tempfile.mkdtemp())
-        self.stats = build([FIXTURES / f"{lang}-sample.jsonl"], lang, tmp / f"{lang}.db")
+        self.stats = build(
+            [FIXTURES / f"{lang}-sample.jsonl"], lang, tmp / f"{lang}.db", zipf=self.ZIPF
+        )
         conn = sqlite3.connect(tmp / f"{lang}.db")
         self.addCleanup(conn.close)
         return conn
@@ -59,7 +82,7 @@ class BuildTest(unittest.TestCase):
         conn = self.build_pack("fr")
         # Dropped: "school" (English), the empty "vide", and the verb form
         # "lance", which lancer's own forms already cover.
-        self.assertEqual(self.stats["entries"], 6)
+        self.assertEqual(self.stats["entries"], 7)
         self.assertEqual(self.stats["dropped_form_entries"], 1)
         self.assertEqual(self.find(conn, "ecole"), [("école", "noun", KIND_HEADWORD)])
         self.assertEqual(self.find(conn, "ECOLES"), [("école", "noun", KIND_FORM)])
@@ -103,13 +126,31 @@ class BuildTest(unittest.TestCase):
         conn = self.build_pack("en")
         self.assertEqual(
             self.find(conn, "went"),
-            [("go", "verb", KIND_FORM)],
+            [("went", "noun", KIND_HEADWORD), ("Went", "name", KIND_HEADWORD), ("go", "verb", KIND_FORM)],
         )
         self.assertEqual(self.find(conn, "children"), [("child", "noun", KIND_FORM)])
         self.assertEqual(self.find(conn, "cafe"), [("café", "noun", KIND_HEADWORD)])
         (blob,) = conn.execute("SELECT data FROM entries WHERE word = 'go'").fetchone()
         forms = [f for g in decode_data(blob)["forms"] for f in g["forms"]]
         self.assertEqual(forms, ["goes", "going", "went", "gone"])  # template rows dropped
+
+    def test_misspelling_links_to_correct_spelling(self):
+        conn = self.build_pack("en")
+        self.assertEqual(self.find(conn, "recieve"), [("receive", "verb", KIND_FORM_OF)])
+        (note,) = conn.execute("SELECT note FROM lookup WHERE key = 'recieve'").fetchone()
+        self.assertEqual(note, "Misspelling of receive.")
+        (blob,) = conn.execute("SELECT data FROM entries WHERE word = 'receive'").fetchone()
+        self.assertEqual(decode_data(blob)["forms"], [{"forms": ["receives"], "tags": ["present", "singular", "third-person"]}])
+
+    def test_frequencies(self):
+        conn = self.build_pack("en")
+        self.assertEqual(conn.execute("SELECT freq FROM entries WHERE word = 'go'").fetchone(), (603,))
+        self.assertEqual(conn.execute("SELECT freq FROM entries WHERE word = 'child'").fetchone(), (0,))
+        keys = dict(conn.execute("SELECT key, freq FROM keys"))
+        self.assertEqual(keys["went"], 550)
+        self.assertEqual(keys["children"], 0)
+        (distinct,) = conn.execute("SELECT COUNT(DISTINCT key) FROM lookup").fetchone()
+        self.assertEqual(len(keys), distinct)
 
     def test_form_of_without_forms_table(self):
         # "goose" lists no forms; only the "geese" entry links back to it.

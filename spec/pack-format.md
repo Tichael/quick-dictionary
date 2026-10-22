@@ -18,10 +18,11 @@ packs are distributed separately from the MIT-licensed code.
 | `lang_name`      | `Français`                                  |
 | `source`         | `Wiktionary, via wiktextract (kaikki.org)`  |
 | `source_files`   | `fr-extract.jsonl.gz`                       |
+| `freq_source`    | `wordfreq (large_fr.msgpack.gz)` or `none`  |
 | `license`        | `CC BY-SA 4.0 (…)`                          |
 | `built_at`       | `2026-10-22T14:00:00+00:00`                 |
 
-### `entries(id, word, pos, ipa, tags, data)`
+### `entries(id, word, pos, ipa, tags, freq, data)`
 
 One row per word *and* part of speech: "lance" (noun) and "lancer" (verb)
 are separate entries. `pos` uses wiktextract's English codes (`noun`,
@@ -38,7 +39,8 @@ whole, and compression shrinks conjugation tables about 7×:
       "glosses": ["Se déplacer jusqu'à un endroit."],
       "tags": ["figuratively"],
       "examples": ["…"],
-      "form_of": ["…"]
+      "form_of": ["…"],
+      "alt_of": ["…"]
     }
   ],
   "forms": [
@@ -55,12 +57,20 @@ keys are left out when empty.
 - **Senses** are the definitions, in Wiktionary order. `glosses` goes from
   general to specific: a sub-sense lists its parent first. Display the last
   item, with the earlier ones as context. `examples` holds at most 2
-  sentences. `form_of` lists the headwords this sense is an inflection of.
+  sentences. `form_of` lists the headwords this sense is an inflection of;
+  `alt_of` lists the ones it is a variant or misspelling of.
 - **Forms** are plurals, feminines and full conjugation tables, in source
   order. Consecutive forms with the same tags are grouped. Conjugation
   forms carry only mood and tense tags (`indicative present`), and the
   person is written into the form itself (`je vais`). When the extractor
   could not map a header to a tag, the original header is in `raw_tags`.
+
+### `keys(key, freq)`
+
+Every distinct `lookup.key`, with its Zipf frequency times 100 (0 when
+unknown) from [wordfreq](https://github.com/rspeer/wordfreq). The app
+builds its typo-tolerant index from this table. `entries.freq` holds the
+same value for the entry's headword.
 
 ### `lookup(key, entry_id, kind, form_ord, note)`
 
@@ -72,17 +82,17 @@ the gloss that made the link ("plural of goose").
 |------|-----------------------------------------------------------------|
 | 0    | headword: the key is the entry's own word                       |
 | 1    | inflected form: `form_ord` is the matched form's index, counted across groups |
-| 2    | form-of: the key is a word whose sense says it's a form of this one |
+| 2    | link: the key's own entry says it is a form, variant or misspelling of this one |
 | 3    | redirect: a Wiktionary redirect page title points to this entry |
 
 There is at most one row per (key, entry). When several kinds apply, the
 lowest one is kept.
 
 Wiktionary also has a page for most inflected forms ("lance": *first
-person singular of lancer*). When every sense of such an entry is a form-of
-link, and its base word is in the pack, the entry is not stored. It becomes
-a kind-2 lookup row instead, since the base word's forms already describe
-it.
+person singular of lancer*), variants and common misspellings ("recieve":
+*misspelling of receive*). When every sense of such an entry is a
+`form_of` or `alt_of` link, and its target is in the pack, the entry is not
+stored. It becomes a kind-2 lookup row instead, with the gloss as `note`.
 
 ## Key normalization
 

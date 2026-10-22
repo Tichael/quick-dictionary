@@ -1,8 +1,12 @@
 __pycache__/
 *.pyc
+/target/
 
 # Raw dumps and built packs are large and are not committed.
 pipeline/raw/
 packs/
 *.db
 *.db.tmp
+
+# Small packs the Rust tests search; rebuilt by pipeline/make_test_packs.py.
+!crates/qd-core/tests/packs/*.db

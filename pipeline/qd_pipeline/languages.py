@@ -16,6 +16,9 @@ SKIP_FORM_TAGS = {
     "romanization",
 }
 
+# Form strings that are extraction leftovers, not words.
+JUNK_FORMS = {"-", "—", "usage notes", "see usage notes"}
+
 
 def _french_key(form: str) -> str:
     key = form
