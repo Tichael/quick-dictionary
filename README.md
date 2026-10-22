@@ -107,7 +107,7 @@ cd crates/qd-app
 cargo tauri build
 ```
 
-The installer is written to `target/release/bundle/nsis/`.
+The MSI installer is written to `target/release/bundle/msi/`.
 
 On Linux, building the app needs the WebKitGTK development packages
 (`libwebkit2gtk-4.1-dev`, `libayatana-appindicator3-dev`, `librsvg2-dev`,
@@ -127,14 +127,19 @@ second, and caches it in `packs/.cache`.
 
 ## Continuous integration
 
-GitHub Actions runs three workflows (in `.github/workflows/`):
+GitHub Actions runs four workflows (in `.github/workflows/`):
 
 - **CI**, on every pull request and push to `main`: the pipeline tests, the
   interface strings check, `cargo fmt`, Clippy and the Rust tests on Linux.
 - **Windows build**, on pull requests and pushes to `main` that change the
   Rust code or the app (Windows minutes cost twice Linux minutes on private
-  repositories), or by hand: builds the app and uploads the installer and
-  the plain `.exe` as the `quick-dictionary-windows` artifact.
+  repositories), or by hand: builds the app and uploads the MSI installer
+  and the plain `.exe` as the `quick-dictionary-windows` artifact (GitHub
+  zips artifacts; releases are not zipped).
+- **App release**, by hand from the Actions tab: builds the MSI installer
+  and publishes it as the `v<version>` release, with the version read from
+  `crates/qd-app/Cargo.toml`. To release, bump that version, merge, and run
+  the workflow; it creates the tag.
 - **Language packs**, once a month or by hand from the Actions tab: builds
   `fr.db` and `en.db` from the latest Wiktionary extracts and publishes them,
   compressed, with a `manifest.json` to the `packs` release (about 12 minutes).

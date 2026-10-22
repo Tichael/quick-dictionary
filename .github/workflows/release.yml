@@ -1,0 +1,53 @@
+name: App release
+
+# Publishes the Windows installer (MSI) as a GitHub release named after the
+# app version in crates/qd-app/Cargo.toml. Run it by hand from the Actions
+# tab after bumping that version; it creates the v<version> tag itself.
+on:
+  workflow_dispatch:
+
+concurrency:
+  group: app-release
+  cancel-in-progress: false
+
+jobs:
+  release:
+    name: Build and publish the installer
+    runs-on: windows-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: ${{ github.repository }}
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: Read the app version
+        id: version
+        run: |
+          version=$(cargo metadata --no-deps --format-version 1 \
+            | python -c "import json, sys; print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name'] == 'quick-dictionary'))")
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          if gh release view "v$version" >/dev/null 2>&1; then
+            echo "::error::Release v$version already exists. Bump the version in crates/qd-app/Cargo.toml first."
+            exit 1
+          fi
+      - name: Test the search core
+        run: cargo test -p qd-core
+      - name: Build the MSI installer
+        working-directory: crates/qd-app
+        run: npx --yes @tauri-apps/cli@2 build
+      - name: Publish the release
+        run: |
+          version=${{ steps.version.outputs.version }}
+          msi="quick-dictionary-$version-x64.msi"
+          cp target/release/bundle/msi/*.msi "$msi"
+          gh release create "v$version" "$msi" \
+            --target "$GITHUB_SHA" \
+            --title "Quick Dictionary $version" \
+            --generate-notes \
+            --latest
