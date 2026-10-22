@@ -27,7 +27,8 @@ pub struct Settings {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum WindowPosition {
-    /// Open the lookup window at the mouse pointer, kept inside its screen.
+    /// Open the lookup window beside the mouse pointer, its search bar level
+    /// with it, on whichever side has room.
     Cursor,
     /// Center the lookup window on the screen the mouse is on.
     Center,

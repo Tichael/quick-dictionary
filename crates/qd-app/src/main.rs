@@ -69,36 +69,46 @@ fn show_lookup(app: &AppHandle) {
     let Some(window) = app.get_webview_window(LOOKUP) else {
         return;
     };
-    match settings(app).position {
-        WindowPosition::Cursor => place_near_cursor(&window, false),
-        WindowPosition::Center => place_near_cursor(&window, true),
-        WindowPosition::Remember => {}
-    }
+    let above = match settings(app).position {
+        WindowPosition::Cursor => place_lookup(&window, true),
+        WindowPosition::Center => place_lookup(&window, false),
+        WindowPosition::Remember => false,
+    };
+    // Before showing, so the window never appears in the wrong layout.
+    let _ = window.emit("lookup-layout", above);
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
     let _ = window.emit("lookup-shown", ());
 }
 
-/// Moves the lookup window onto the screen the mouse is on: centered on
-/// that screen, or with its top-left corner at the pointer. Either way the
-/// whole window stays inside the screen's work area (not under the taskbar).
-fn place_near_cursor(window: &WebviewWindow, center: bool) {
+/// Distance, in logical pixels, from the lookup window's edge to the middle
+/// of its search bar (border, header padding and half the input, as in
+/// lookup.css).
+const SEARCH_BAR_MIDDLE: f64 = 30.0;
+/// Space, in logical pixels, between the mouse pointer and the window.
+const CURSOR_GAP: f64 = 12.0;
+
+/// Moves the lookup window onto the screen the mouse is on: next to the
+/// pointer, or centered on that screen. Returns whether the window opens
+/// above the pointer, with its search bar at the bottom.
+fn place_lookup(window: &WebviewWindow, at_cursor: bool) -> bool {
     let Ok(cursor) = window.cursor_position() else {
-        return;
+        return false;
     };
     let Ok(Some(monitor)) = window.monitor_from_point(cursor.x, cursor.y) else {
-        return;
+        return false;
     };
     let Ok(size) = window.outer_size() else {
-        return;
+        return false;
     };
     // The window takes the target screen's scale once it is there.
-    let scale = monitor.scale_factor() / window.scale_factor().unwrap_or(1.0);
-    let size = (
-        (f64::from(size.width) * scale).round() as i32,
-        (f64::from(size.height) * scale).round() as i32,
-    );
+    let scale = monitor.scale_factor();
+    let resize = scale / window.scale_factor().unwrap_or(1.0);
+    let size = Size {
+        width: (f64::from(size.width) * resize).round() as i32,
+        height: (f64::from(size.height) * resize).round() as i32,
+    };
     let area = monitor.work_area();
     let area = Rect {
         x: area.position.x,
@@ -106,13 +116,19 @@ fn place_near_cursor(window: &WebviewWindow, center: bool) {
         width: area.size.width as i32,
         height: area.size.height as i32,
     };
-    let anchor = if center {
-        None
+    let placement = if at_cursor {
+        beside_cursor(
+            area,
+            size,
+            (cursor.x.round() as i32, cursor.y.round() as i32),
+            (CURSOR_GAP * scale).round() as i32,
+            (SEARCH_BAR_MIDDLE * scale).round() as i32,
+        )
     } else {
-        Some((cursor.x.round() as i32, cursor.y.round() as i32))
+        centered(area, size)
     };
-    let (x, y) = window_origin(area, size, anchor);
-    let _ = window.set_position(PhysicalPosition::new(x, y));
+    let _ = window.set_position(PhysicalPosition::new(placement.x, placement.y));
+    placement.above
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -123,17 +139,74 @@ struct Rect {
     height: i32,
 }
 
-/// Where to put a window of `size` in `area`: at `anchor` if given,
-/// otherwise centered, then pushed back inside `area`. A window bigger than
-/// the area keeps its top-left corner visible.
-fn window_origin(area: Rect, size: (i32, i32), anchor: Option<(i32, i32)>) -> (i32, i32) {
-    let (x, y) = anchor.unwrap_or((
-        area.x + (area.width - size.0) / 2,
-        area.y + (area.height - size.1) / 2,
-    ));
-    let x = x.min(area.x + area.width - size.0).max(area.x);
-    let y = y.min(area.y + area.height - size.1).max(area.y);
-    (x, y)
+#[derive(Debug, Clone, Copy)]
+struct Size {
+    width: i32,
+    height: i32,
+}
+
+#[derive(Debug, PartialEq)]
+struct Placement {
+    x: i32,
+    y: i32,
+    /// The window is above its anchor: its search bar goes at the bottom.
+    above: bool,
+}
+
+fn centered(area: Rect, size: Size) -> Placement {
+    Placement {
+        x: inside(
+            area.x,
+            area.width,
+            size.width,
+            area.x + (area.width - size.width) / 2,
+        ),
+        y: inside(
+            area.y,
+            area.height,
+            size.height,
+            area.y + (area.height - size.height) / 2,
+        ),
+        above: false,
+    }
+}
+
+/// Puts a window of `size` beside `cursor`, `gap` pixels to its right, or
+/// to its left when the right lacks room, with the middle of its search bar
+/// (`bar` pixels from the window's top or bottom edge) level with the
+/// pointer. The rest of the window opens below the bar, or above it when
+/// only the top has room. When neither side fits, the roomier one wins and
+/// the window is pushed back inside `area`.
+fn beside_cursor(area: Rect, size: Size, cursor: (i32, i32), gap: i32, bar: i32) -> Placement {
+    let (cx, cy) = cursor;
+    let right = cx + gap;
+    let left = cx - gap - size.width;
+    let x = if right + size.width <= area.x + area.width {
+        right
+    } else if left >= area.x {
+        left
+    } else if area.x + area.width - cx >= cx - area.x {
+        right
+    } else {
+        left
+    };
+    let below = cy - bar;
+    let up = cy + bar - size.height;
+    let above = !(below + size.height <= area.y + area.height)
+        && (up >= area.y || cy - area.y > area.y + area.height - cy);
+    let y = if above { up } else { below };
+    Placement {
+        x: inside(area.x, area.width, size.width, x),
+        y: inside(area.y, area.height, size.height, y),
+        above,
+    }
+}
+
+/// Moves `pos`, the start of a span of `len`, so the span fits in the one
+/// that starts at `start` and is `room` long. A span longer than the room
+/// keeps its start visible.
+fn inside(start: i32, room: i32, len: i32, pos: i32) -> i32 {
+    pos.min(start + room - len).max(start)
 }
 
 fn toggle_lookup(app: &AppHandle) {
@@ -601,38 +674,126 @@ mod tests {
         width: 1920,
         height: 1040,
     };
+    const SIZE: Size = Size {
+        width: 580,
+        height: 560,
+    };
+
+    fn at(cursor: (i32, i32)) -> Placement {
+        beside_cursor(AREA, SIZE, cursor, 12, 30)
+    }
 
     #[test]
     fn centers_on_the_area() {
-        assert_eq!(window_origin(AREA, (580, 560), None), (2590, 240));
-    }
-
-    #[test]
-    fn opens_at_the_cursor() {
+        let placement = centered(AREA, SIZE);
         assert_eq!(
-            window_origin(AREA, (580, 560), Some((2000, 100))),
-            (2000, 100)
+            placement,
+            Placement {
+                x: 2590,
+                y: 240,
+                above: false
+            }
         );
     }
 
     #[test]
-    fn stays_inside_the_area_near_its_edges() {
+    fn opens_right_and_below_when_there_is_room() {
         assert_eq!(
-            window_origin(AREA, (580, 560), Some((3800, 1000))),
-            (3260, 480)
+            at((2000, 100)),
+            Placement {
+                x: 2012,
+                y: 70,
+                above: false
+            }
         );
+    }
+
+    #[test]
+    fn opens_left_near_the_right_edge() {
         assert_eq!(
-            window_origin(AREA, (580, 560), Some((1900, -20))),
-            (1920, 0)
+            at((3500, 100)),
+            Placement {
+                x: 2908,
+                y: 70,
+                above: false
+            }
+        );
+    }
+
+    #[test]
+    fn opens_above_near_the_bottom_edge() {
+        // The search bar's middle stays level with the pointer.
+        assert_eq!(
+            at((2000, 900)),
+            Placement {
+                x: 2012,
+                y: 370,
+                above: true
+            }
+        );
+    }
+
+    #[test]
+    fn opens_left_and_above_in_the_bottom_right_corner() {
+        // Too close to the bottom for the bar to be level: it stays inside.
+        assert_eq!(
+            at((3800, 1030)),
+            Placement {
+                x: 3208,
+                y: 480,
+                above: true
+            }
+        );
+    }
+
+    #[test]
+    fn keeps_the_bar_inside_at_the_very_top() {
+        assert_eq!(
+            at((2000, 5)),
+            Placement {
+                x: 2012,
+                y: 0,
+                above: false
+            }
+        );
+    }
+
+    #[test]
+    fn takes_the_roomier_side_when_neither_fits() {
+        // Pointer in the middle of a screen shorter than the window: it
+        // opens below, then is pushed up to fit.
+        let area = Rect {
+            height: 700,
+            ..AREA
+        };
+        let placement = beside_cursor(area, SIZE, (2000, 340), 12, 30);
+        assert_eq!(
+            placement,
+            Placement {
+                x: 2012,
+                y: 140,
+                above: false
+            }
+        );
+        let placement = beside_cursor(area, SIZE, (2000, 400), 12, 30);
+        assert_eq!(
+            placement,
+            Placement {
+                x: 2012,
+                y: 0,
+                above: true
+            }
         );
     }
 
     #[test]
     fn too_big_keeps_its_top_left_visible() {
-        assert_eq!(
-            window_origin(AREA, (2500, 1200), Some((3000, 500))),
-            (1920, 0)
-        );
+        let size = Size {
+            width: 2500,
+            height: 1200,
+        };
+        let placement = beside_cursor(AREA, size, (3000, 500), 12, 30);
+        assert_eq!((placement.x, placement.y), (1920, 0));
     }
 
     /// The release workflow names releases after the Cargo.toml version:
