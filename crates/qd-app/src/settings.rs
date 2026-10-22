@@ -27,7 +27,9 @@ pub struct Settings {
 #[derive(Debug, Clone, Copy, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum WindowPosition {
-    /// Center the lookup window on the screen every time it opens.
+    /// Open the lookup window at the mouse pointer, kept inside its screen.
+    Cursor,
+    /// Center the lookup window on the screen the mouse is on.
     Center,
     /// Open the lookup window where it was last moved.
     Remember,
@@ -57,7 +59,7 @@ impl Default for Settings {
             start_with_system: true,
             hide_on_blur: true,
             clear_on_show: false,
-            position: WindowPosition::Center,
+            position: WindowPosition::Cursor,
             theme: Theme::System,
             language: Language::System,
             max_results: 12,

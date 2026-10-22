@@ -18,7 +18,8 @@ use serde::Serialize;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{
-    AppHandle, Emitter, Manager, State, WebviewUrl, WebviewWindowBuilder, WindowEvent, Wry,
+    AppHandle, Emitter, Manager, PhysicalPosition, State, WebviewUrl, WebviewWindow,
+    WebviewWindowBuilder, WindowEvent, Wry,
 };
 use tauri_plugin_autostart::ManagerExt as _;
 use tauri_plugin_dialog::{DialogExt, MessageDialogButtons, MessageDialogKind};
@@ -68,13 +69,71 @@ fn show_lookup(app: &AppHandle) {
     let Some(window) = app.get_webview_window(LOOKUP) else {
         return;
     };
-    if settings(app).position == WindowPosition::Center {
-        let _ = window.center();
+    match settings(app).position {
+        WindowPosition::Cursor => place_near_cursor(&window, false),
+        WindowPosition::Center => place_near_cursor(&window, true),
+        WindowPosition::Remember => {}
     }
     let _ = window.show();
     let _ = window.unminimize();
     let _ = window.set_focus();
     let _ = window.emit("lookup-shown", ());
+}
+
+/// Moves the lookup window onto the screen the mouse is on: centered on
+/// that screen, or with its top-left corner at the pointer. Either way the
+/// whole window stays inside the screen's work area (not under the taskbar).
+fn place_near_cursor(window: &WebviewWindow, center: bool) {
+    let Ok(cursor) = window.cursor_position() else {
+        return;
+    };
+    let Ok(Some(monitor)) = window.monitor_from_point(cursor.x, cursor.y) else {
+        return;
+    };
+    let Ok(size) = window.outer_size() else {
+        return;
+    };
+    // The window takes the target screen's scale once it is there.
+    let scale = monitor.scale_factor() / window.scale_factor().unwrap_or(1.0);
+    let size = (
+        (f64::from(size.width) * scale).round() as i32,
+        (f64::from(size.height) * scale).round() as i32,
+    );
+    let area = monitor.work_area();
+    let area = Rect {
+        x: area.position.x,
+        y: area.position.y,
+        width: area.size.width as i32,
+        height: area.size.height as i32,
+    };
+    let anchor = if center {
+        None
+    } else {
+        Some((cursor.x.round() as i32, cursor.y.round() as i32))
+    };
+    let (x, y) = window_origin(area, size, anchor);
+    let _ = window.set_position(PhysicalPosition::new(x, y));
+}
+
+#[derive(Debug, Clone, Copy)]
+struct Rect {
+    x: i32,
+    y: i32,
+    width: i32,
+    height: i32,
+}
+
+/// Where to put a window of `size` in `area`: at `anchor` if given,
+/// otherwise centered, then pushed back inside `area`. A window bigger than
+/// the area keeps its top-left corner visible.
+fn window_origin(area: Rect, size: (i32, i32), anchor: Option<(i32, i32)>) -> (i32, i32) {
+    let (x, y) = anchor.unwrap_or((
+        area.x + (area.width - size.0) / 2,
+        area.y + (area.height - size.1) / 2,
+    ));
+    let x = x.min(area.x + area.width - size.0).max(area.x);
+    let y = y.min(area.y + area.height - size.1).max(area.y);
+    (x, y)
 }
 
 fn toggle_lookup(app: &AppHandle) {
@@ -533,6 +592,49 @@ fn main() {
 
 #[cfg(test)]
 mod tests {
+    use super::*;
+
+    // A 1920x1040 work area on a second screen, right of the first.
+    const AREA: Rect = Rect {
+        x: 1920,
+        y: 0,
+        width: 1920,
+        height: 1040,
+    };
+
+    #[test]
+    fn centers_on_the_area() {
+        assert_eq!(window_origin(AREA, (580, 560), None), (2590, 240));
+    }
+
+    #[test]
+    fn opens_at_the_cursor() {
+        assert_eq!(
+            window_origin(AREA, (580, 560), Some((2000, 100))),
+            (2000, 100)
+        );
+    }
+
+    #[test]
+    fn stays_inside_the_area_near_its_edges() {
+        assert_eq!(
+            window_origin(AREA, (580, 560), Some((3800, 1000))),
+            (3260, 480)
+        );
+        assert_eq!(
+            window_origin(AREA, (580, 560), Some((1900, -20))),
+            (1920, 0)
+        );
+    }
+
+    #[test]
+    fn too_big_keeps_its_top_left_visible() {
+        assert_eq!(
+            window_origin(AREA, (2500, 1200), Some((3000, 500))),
+            (1920, 0)
+        );
+    }
+
     /// The release workflow names releases after the Cargo.toml version:
     /// the app must report that same version (tauri.conf.json sets none).
     #[test]
