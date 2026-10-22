@@ -108,6 +108,18 @@ cargo run --release -p qd -- --complete conjug # completions
 The first run builds a search index for each pack, which takes about a
 second, and caches it in `packs/.cache`.
 
+## Continuous integration
+
+GitHub Actions runs two workflows (in `.github/workflows/`):
+
+- **CI**, on every push and pull request: the pipeline tests, `cargo fmt`,
+  Clippy and the Rust tests on Linux, and a Windows build. The Windows job
+  uploads the installer and the plain `.exe` as the
+  `quick-dictionary-windows` artifact, downloadable from the run's page.
+- **Language packs**, run by hand from the Actions tab or when `pipeline/`
+  changes: downloads the latest Wiktionary extracts and builds `fr.db` and
+  `en.db`, uploaded as the `pack-fr` and `pack-en` artifacts (kept 30 days).
+
 ## Tests
 
 ```sh
