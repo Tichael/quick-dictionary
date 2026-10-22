@@ -4,7 +4,8 @@ name: Release
 # last release decide whether to release and the version (fix: patch,
 # feat: minor, feat!/BREAKING CHANGE: major). It bumps the version in
 # crates/qd-app/Cargo.toml, tags v<version> and creates the GitHub release;
-# the Windows job then attaches the MSI installer.
+# the Windows job then attaches the MSI installer, signed for the app's
+# updater, and the latest.json that tells installed copies about it.
 on:
   push:
     branches: [main]
@@ -73,11 +74,26 @@ jobs:
           ref: v${{ needs.release.outputs.version }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Build the MSI installer
+      # Installed copies only accept an update signed with the key whose
+      # public half is in tauri.conf.json (see crates/qd-app/src/updates.rs).
+      - name: Check the updater's public key is set
+        run: |
+          python -c "import json, sys; key = json.load(open('crates/qd-app/tauri.conf.json'))['plugins']['updater']['pubkey']; sys.exit(None if key else 'plugins.updater.pubkey is empty in crates/qd-app/tauri.conf.json')"
+      - name: Build the MSI installer and sign it for the updater
         working-directory: crates/qd-app
-        run: npx --yes @tauri-apps/cli@2 build
+        env:
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        run: npx --yes @tauri-apps/cli@2 build --config '{"bundle":{"createUpdaterArtifacts":true}}'
       - name: Upload it to the release
         run: |
           msi="quick-dictionary-$VERSION-x64.msi"
-          cp target/release/bundle/msi/*.msi "$msi"
-          gh release upload "v$VERSION" "$msi" --clobber
+          built=$(ls target/release/bundle/msi/*.msi)
+          cp "$built" "$msi"
+          cp "$built.sig" "$msi.sig"
+          python scripts/updater_manifest.py "$VERSION" "$msi" \
+            "https://github.com/$GH_REPO/releases/download/v$VERSION/$msi" -o latest.json
+          # Installer first, latest.json last: installed copies only hear of
+          # the new version once its installer is in place.
+          gh release upload "v$VERSION" "$msi" "$msi.sig" --clobber
+          gh release upload "v$VERSION" latest.json --clobber

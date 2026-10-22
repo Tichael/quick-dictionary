@@ -251,6 +251,61 @@ await listen("download-progress", (event) => {
   renderDownloads();
 });
 
+// --- App updates ---------------------------------------------------------
+
+const updateStatusEl = document.getElementById("update-status");
+const updateActionEl = document.getElementById("update-action");
+let update = await invoke("update_status").catch(() => ({ state: "idle" }));
+
+function renderUpdate() {
+  const button = (id, label, primary = false) =>
+    `<button id="${id}"${primary ? ` class="primary"` : ""}>${esc(label)}</button>`;
+  let status = "";
+  let action = "";
+  switch (update.state) {
+    case "checking":
+      status = esc(t("about.updateChecking"));
+      break;
+    case "upToDate":
+      status = esc(t("about.updateUpToDate"));
+      action = button("check-update", t("about.updateCheck"));
+      break;
+    case "available": {
+      const notes = `https://github.com/Tichael/quick-dictionary/releases/tag/v${encodeURIComponent(update.version)}`;
+      status = `${esc(t("about.updateAvailable", { version: update.version }))} <a href="${esc(notes)}">${esc(t("about.updateNotes"))}</a>`;
+      action = button("install-update", t("about.updateInstall"), true);
+      break;
+    }
+    case "downloading": {
+      const percent = Math.min(100, Math.floor((update.received * 100) / Math.max(update.total, 1)));
+      status = `${esc(t("about.updateDownloading", { percent }))}<div class="progress"><div style="width: ${percent}%"></div></div>`;
+      break;
+    }
+    case "installing":
+      status = esc(t("about.updateInstalling"));
+      break;
+    case "failed":
+      status = `<span class="error">${esc(update.message)}</span>`;
+      action = button("check-update", t("about.updateCheck"));
+      break;
+    default:
+      action = button("check-update", t("about.updateCheck"));
+  }
+  updateStatusEl.innerHTML = status;
+  updateActionEl.innerHTML = action;
+}
+
+// Errors arrive as a "failed" status too, and show in the About section.
+updateActionEl.addEventListener("click", (event) => {
+  if (event.target.closest("#check-update")) invoke("check_for_update").catch(() => {});
+  if (event.target.closest("#install-update")) invoke("install_update").catch(() => {});
+});
+
+await listen("update-status", (event) => {
+  update = event.payload;
+  renderUpdate();
+});
+
 // --- Navigation ----------------------------------------------------------
 
 // External links open in the browser, not in this window.
@@ -290,14 +345,22 @@ for (const a of navLinks) {
   });
 }
 
+// The app asks for a section when it opens this window for it (an update
+// being installed shows in About).
+await listen("show-section", (event) => {
+  document.getElementById(event.payload)?.scrollIntoView();
+});
+
 await listen("library-changed", showPacks);
 await listen("settings-changed", async (event) => {
   settings = event.payload;
   await loadLanguage();
   fill();
   showPacks();
+  renderUpdate();
 });
 
 fill();
 showPacks();
+renderUpdate();
 checkDownloads();

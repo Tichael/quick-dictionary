@@ -8,6 +8,7 @@ mod downloads;
 mod i18n;
 mod library;
 mod settings;
+mod updates;
 
 use std::collections::HashSet;
 use std::path::PathBuf;
@@ -109,13 +110,29 @@ fn create_lookup(app: &AppHandle) -> tauri::Result<()> {
 }
 
 fn show_settings(app: &AppHandle) {
+    open_settings_window(app, None);
+}
+
+/// Shows the settings window scrolled to one of its sections ("about"…).
+fn show_settings_section(app: &AppHandle, section: &str) {
+    open_settings_window(app, Some(section));
+}
+
+fn open_settings_window(app: &AppHandle, section: Option<&str>) {
     if let Some(window) = app.get_webview_window(SETTINGS) {
         let _ = window.unminimize();
         let _ = window.show();
         let _ = window.set_focus();
+        if let Some(section) = section {
+            let _ = window.emit("show-section", section);
+        }
         return;
     }
-    let built = WebviewWindowBuilder::new(app, SETTINGS, WebviewUrl::App("settings.html".into()))
+    let page = match section {
+        Some(section) => format!("settings.html#{section}"),
+        None => "settings.html".into(),
+    };
+    let built = WebviewWindowBuilder::new(app, SETTINGS, WebviewUrl::App(page.into()))
         .title(text(ui_lang(app), Text::SettingsTitle))
         .inner_size(680.0, 620.0)
         .min_inner_size(520.0, 400.0)
@@ -361,6 +378,24 @@ async fn download_pack(lang: String, app: AppHandle) -> Result<(), String> {
 }
 
 #[tauri::command]
+fn update_status(updates: State<updates::Updates>) -> updates::Status {
+    updates.status()
+}
+
+/// Looks for a newer version of the app. Sends "update-status" events.
+#[tauri::command]
+async fn check_for_update(app: AppHandle) -> Result<updates::Status, String> {
+    updates::check(&app).await
+}
+
+/// Installs the version found by `check_for_update`, then restarts the
+/// app. Sends "update-status" events while downloading.
+#[tauri::command]
+async fn install_update(app: AppHandle) -> Result<(), String> {
+    updates::install(&app).await
+}
+
+#[tauri::command]
 async fn reload_packs(app: AppHandle) -> Result<(), String> {
     let result = app.state::<AppState>().library.reload();
     let _ = app.emit("library-changed", ());
@@ -449,6 +484,7 @@ fn main() {
         ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_opener::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
         .setup(|app| {
             let paths = app.path();
             // QD_PACKS points the app at another packs folder (development).
@@ -478,8 +514,13 @@ fn main() {
                 tray_items: Mutex::new(Vec::new()),
                 downloading: Mutex::new(HashSet::new()),
             });
+            app.manage(updates::Updates::default());
             create_lookup(&handle)?;
             setup_tray(&handle)?;
+            // Development builds have nothing to update.
+            if !cfg!(debug_assertions) {
+                updates::check_in_background(handle.clone());
+            }
 
             // Open the packs in the background: the first time, building
             // their search indexes takes a few seconds.
@@ -525,6 +566,9 @@ fn main() {
             log_error,
             available_packs,
             download_pack,
+            update_status,
+            check_for_update,
+            install_update,
         ])
         .build(tauri::generate_context!())
         .expect("building the app")

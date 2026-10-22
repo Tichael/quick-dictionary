@@ -146,7 +146,9 @@ GitHub Actions runs five workflows (in `.github/workflows/`):
   major; `docs:`, `ci:`, `chore:`… release nothing). When there is something
   to release, it sets the version in `crates/qd-app/Cargo.toml`, tags
   `v<version>`, creates the GitHub release with generated notes, and a
-  Windows job attaches the MSI installer. Configured in `.releaserc.json`.
+  Windows job attaches the MSI installer, signed for the app's updater,
+  with the `latest.json` that tells installed copies about it. Configured
+  in `.releaserc.json`.
 - **PR title**, on pull requests: checks the title follows Conventional
   Commits.
 - **Language packs**, once a month or by hand from the Actions tab: builds
@@ -155,6 +157,26 @@ GitHub Actions runs five workflows (in `.github/workflows/`):
 
 The app downloads release files without signing in, which only works while
 the repository is public.
+
+### App updates
+
+The app checks for a newer version 10 seconds after it starts, then once a
+day, and asks before installing it (Settings → About also has a button).
+It reads `latest.json` from the latest GitHub release, and only installs an
+installer signed with the updater key. To set that key up, once:
+
+```sh
+npx @tauri-apps/cli@2 signer generate -w ~/.tauri/quick-dictionary.key
+```
+
+Put the public key (the `.key.pub` file's content) in
+`plugins.updater.pubkey` in `crates/qd-app/tauri.conf.json`, and add the
+private key and its password as the repository secrets
+`TAURI_SIGNING_PRIVATE_KEY` and `TAURI_SIGNING_PRIVATE_KEY_PASSWORD`. Keep
+a copy of the private key: installed copies only accept updates signed with
+it. The release workflow refuses to build while the public key is missing.
+
+`QD_UPDATES_URL` points the app at another `latest.json` (testing).
 
 ## Contributing
 
