@@ -136,16 +136,26 @@ GitHub Actions runs four workflows (in `.github/workflows/`):
   repositories), or by hand: builds the app and uploads the MSI installer
   and the plain `.exe` as the `quick-dictionary-windows` artifact (GitHub
   zips artifacts; releases are not zipped).
-- **App release**, by hand from the Actions tab: builds the MSI installer
-  and publishes it as the `v<version>` release, with the version read from
-  `crates/qd-app/Cargo.toml`. To release, bump that version, merge, and run
-  the workflow; it creates the tag.
+- **Release**, on every push to `main`:
+  [semantic-release](https://semantic-release.gitbook.io/) reads the
+  [Conventional Commits](https://www.conventionalcommits.org/) since the last
+  release (`fix:` → patch, `feat:` → minor, `feat!:` or `BREAKING CHANGE:` →
+  major; `docs:`, `ci:`, `chore:`… release nothing). When there is something
+  to release, it sets the version in `crates/qd-app/Cargo.toml`, tags
+  `v<version>`, creates the GitHub release with generated notes, and a
+  Windows job attaches the MSI installer. Configured in `.releaserc.json`.
 - **Language packs**, once a month or by hand from the Actions tab: builds
   `fr.db` and `en.db` from the latest Wiktionary extracts and publishes them,
   compressed, with a `manifest.json` to the `packs` release (about 12 minutes).
 
 The app downloads release files without signing in, which only works while
 the repository is public.
+
+## Contributing
+
+Commit messages (or pull request titles, when squash-merging) follow
+[Conventional Commits](https://www.conventionalcommits.org/): they decide
+the next version.
 
 ## Tests
 

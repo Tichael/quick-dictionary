@@ -1,53 +1,73 @@
-name: App release
+name: Release
 
-# Publishes the Windows installer (MSI) as a GitHub release named after the
-# app version in crates/qd-app/Cargo.toml. Run it by hand from the Actions
-# tab after bumping that version; it creates the v<version> tag itself.
+# semantic-release: on each push to main, the Conventional Commits since the
+# last release decide whether to release and the version (fix: patch,
+# feat: minor, feat!/BREAKING CHANGE: major). It bumps the version in
+# crates/qd-app/Cargo.toml, tags v<version> and creates the GitHub release;
+# the Windows job then attaches the MSI installer.
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
 
 concurrency:
-  group: app-release
+  group: release
   cancel-in-progress: false
 
 jobs:
   release:
-    name: Build and publish the installer
+    name: Decide and create the release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+    outputs:
+      version: ${{ steps.semantic.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Run semantic-release
+        id: semantic
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: >
+          npx --yes
+          -p semantic-release@24
+          -p @semantic-release/exec@6
+          -p @semantic-release/git@10
+          -p conventional-changelog-conventionalcommits@8
+          semantic-release
+
+  installer:
+    name: Attach the Windows installer
+    needs: release
+    if: needs.release.outputs.version != ''
     runs-on: windows-latest
     permissions:
       contents: write
     env:
       GH_TOKEN: ${{ github.token }}
       GH_REPO: ${{ github.repository }}
+      VERSION: ${{ needs.release.outputs.version }}
     defaults:
       run:
         shell: bash
     steps:
       - uses: actions/checkout@v4
+        with:
+          ref: v${{ needs.release.outputs.version }}
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
-      - name: Read the app version
-        id: version
-        run: |
-          version=$(cargo metadata --no-deps --format-version 1 \
-            | python -c "import json, sys; print(next(p['version'] for p in json.load(sys.stdin)['packages'] if p['name'] == 'quick-dictionary'))")
-          echo "version=$version" >> "$GITHUB_OUTPUT"
-          if gh release view "v$version" >/dev/null 2>&1; then
-            echo "::error::Release v$version already exists. Bump the version in crates/qd-app/Cargo.toml first."
-            exit 1
-          fi
-      - name: Test the search core
-        run: cargo test -p qd-core
       - name: Build the MSI installer
         working-directory: crates/qd-app
         run: npx --yes @tauri-apps/cli@2 build
-      - name: Publish the release
+      - name: Upload it to the release
         run: |
-          version=${{ steps.version.outputs.version }}
-          msi="quick-dictionary-$version-x64.msi"
+          msi="quick-dictionary-$VERSION-x64.msi"
           cp target/release/bundle/msi/*.msi "$msi"
-          gh release create "v$version" "$msi" \
-            --target "$GITHUB_SHA" \
-            --title "Quick Dictionary $version" \
-            --generate-notes \
-            --latest
+          gh release upload "v$VERSION" "$msi" --clobber
