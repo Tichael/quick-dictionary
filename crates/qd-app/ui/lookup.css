@@ -53,6 +53,14 @@ header {
   padding: 4px 0 12px;
 }
 
+/* Opened above the mouse pointer: everything stacks up from the search bar. */
+body.above { flex-direction: column-reverse; }
+body.above header { padding: 8px 8px 10px 12px; border-bottom: none; border-top: 1px solid var(--border); }
+body.above #completions:not(:empty),
+body.above #notice:not(:empty) { border-bottom: none; border-top: 1px solid var(--border); }
+body.above #results { display: flex; flex-direction: column; padding: 12px 0 4px; }
+body.above #results > :first-child { margin-top: auto; }
+
 .result {
   padding: 8px 14px;
   border-left: 3px solid transparent;
@@ -173,3 +181,4 @@ details summary { cursor: pointer; color: var(--text-muted); margin-top: 10px; }
   border-radius: 999px;
   font-size: 12px;
 }
+body.above #toast { bottom: auto; top: 12px; }

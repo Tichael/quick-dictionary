@@ -157,6 +157,12 @@ document.addEventListener("click", (event) => {
   }
 });
 
+// Opened above the mouse pointer: the search bar goes at the bottom, next
+// to the pointer, and the results grow upward from it.
+await listen("lookup-layout", (event) => {
+  document.body.classList.toggle("above", event.payload);
+});
+
 await listen("lookup-shown", () => {
   if (settings.clearOnShow) {
     input.value = "";
