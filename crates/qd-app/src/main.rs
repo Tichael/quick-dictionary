@@ -538,6 +538,9 @@ mod tests {
     #[test]
     fn app_version_comes_from_cargo_toml() {
         let context: tauri::Context<tauri::Wry> = tauri::generate_context!();
-        assert_eq!(context.package_info().version.to_string(), env!("CARGO_PKG_VERSION"));
+        assert_eq!(
+            context.package_info().version.to_string(),
+            env!("CARGO_PKG_VERSION")
+        );
     }
 }
