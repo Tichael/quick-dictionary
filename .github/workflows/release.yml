@@ -31,6 +31,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
+      # Releases start in 0.x: without any v* tag yet, tag the first commit
+      # v0.0.0 so the first feat: commit releases 0.1.0 (not 1.0.0).
+      - name: Create the v0.0.0 starting tag if there is no release yet
+        run: |
+          if [ -z "$(git tag --list 'v*')" ]; then
+            git tag v0.0.0 "$(git rev-list --max-parents=0 HEAD | tail -n 1)"
+            git push origin v0.0.0
+          fi
       - name: Run semantic-release
         id: semantic
         env:
