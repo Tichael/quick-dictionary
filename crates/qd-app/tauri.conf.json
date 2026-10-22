@@ -25,5 +25,17 @@
     ],
     "shortDescription": "Offline dictionary and conjugator, one shortcut away",
     "copyright": "MIT License (code); CC BY-SA 4.0 (dictionary data)"
+  },
+  "plugins": {
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IEQ3MTZGNThBOTJGNjAyNjQKUldSa0F2YVNpdlVXMTd5RHpzN0dqZVdNSHNDeXoxK1hnZWJ2T202U1VaTHN4a2tFMWQ0RHJGT3QK",
+      "endpoints": [
+        "https://github.com/Tichael/quick-dictionary/releases/latest/download/latest.json"
+      ],
+      "requireSignedVersion": true,
+      "windows": {
+        "installMode": "passive"
+      }
+    }
   }
 }

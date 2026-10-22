@@ -45,6 +45,9 @@ pub enum Text {
     RemoveTitle,
     RemoveButton,
     Cancel,
+    UpdateTitle,
+    UpdateInstall,
+    UpdateLater,
 }
 
 /// The match is exhaustive, so a missing translation does not compile.
@@ -60,6 +63,9 @@ pub fn text(lang: Lang, text: Text) -> &'static str {
         (Lang::En, RemoveTitle) => "Remove a dictionary",
         (Lang::En, RemoveButton) => "Remove",
         (Lang::En, Cancel) => "Cancel",
+        (Lang::En, UpdateTitle) => "Update available",
+        (Lang::En, UpdateInstall) => "Install and restart",
+        (Lang::En, UpdateLater) => "Later",
         (Lang::Fr, TrayLookup) => "Chercher un mot",
         (Lang::Fr, TraySettings) => "Paramètres…",
         (Lang::Fr, TrayQuit) => "Quitter",
@@ -69,6 +75,9 @@ pub fn text(lang: Lang, text: Text) -> &'static str {
         (Lang::Fr, RemoveTitle) => "Supprimer un dictionnaire",
         (Lang::Fr, RemoveButton) => "Supprimer",
         (Lang::Fr, Cancel) => "Annuler",
+        (Lang::Fr, UpdateTitle) => "Mise à jour disponible",
+        (Lang::Fr, UpdateInstall) => "Installer et redémarrer",
+        (Lang::Fr, UpdateLater) => "Plus tard",
     }
 }
 
@@ -152,6 +161,33 @@ pub fn checksum_error(lang: Lang, name: &str) -> String {
         Lang::Fr => {
             format!("Le dictionnaire {name} a été abîmé pendant le téléchargement. Réessayez.")
         }
+    }
+}
+
+pub fn update_question(lang: Lang, version: &str, current: &str) -> String {
+    match lang {
+        Lang::En => format!(
+            "Quick Dictionary {version} is available (you have {current}). Install it now? \
+             The app will restart."
+        ),
+        Lang::Fr => format!(
+            "Quick Dictionary {version} est disponible (vous avez la {current}). \
+             L’installer maintenant ? L’application redémarrera."
+        ),
+    }
+}
+
+pub fn update_check_error(lang: Lang, error: impl Display) -> String {
+    match lang {
+        Lang::En => format!("Could not check for updates: {error}"),
+        Lang::Fr => format!("Impossible de rechercher les mises à jour : {error}"),
+    }
+}
+
+pub fn update_install_error(lang: Lang, error: impl Display) -> String {
+    match lang {
+        Lang::En => format!("Could not install the update: {error}"),
+        Lang::Fr => format!("Impossible d’installer la mise à jour : {error}"),
     }
 }
 
