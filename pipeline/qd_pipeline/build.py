@@ -10,10 +10,12 @@ matches --lang are kept. See spec/pack-format.md for the output schema.
 import argparse
 import datetime
 import gzip
+import itertools
 import json
 import sqlite3
 import sys
 import time
+import zlib
 from pathlib import Path
 
 from .languages import LANGUAGES, SKIP_FORM_TAGS
@@ -35,36 +37,24 @@ CREATE TABLE entries (
     word TEXT NOT NULL,
     pos TEXT NOT NULL,
     ipa TEXT,
-    tags TEXT
-);
-CREATE TABLE senses (
-    entry_id INTEGER NOT NULL REFERENCES entries(id),
-    ord INTEGER NOT NULL,
-    glosses TEXT NOT NULL,
     tags TEXT,
-    examples TEXT,
-    form_of TEXT
-);
-CREATE TABLE forms (
-    entry_id INTEGER NOT NULL REFERENCES entries(id),
-    ord INTEGER NOT NULL,
-    form TEXT NOT NULL,
-    tags TEXT,
-    raw_tags TEXT
+    data BLOB NOT NULL
 );
 CREATE TABLE lookup (
     key TEXT NOT NULL,
     entry_id INTEGER NOT NULL REFERENCES entries(id),
     kind INTEGER NOT NULL,
     form_ord INTEGER,
+    note TEXT,
+    PRIMARY KEY (key, entry_id)
+) WITHOUT ROWID;
+CREATE TEMP TABLE lookup_stage (
+    key TEXT NOT NULL,
+    entry_id INTEGER NOT NULL,
+    kind INTEGER NOT NULL,
+    form_ord INTEGER,
     note TEXT
 );
-"""
-
-INDEXES = """
-CREATE INDEX senses_entry ON senses(entry_id, ord);
-CREATE INDEX forms_entry ON forms(entry_id, ord);
-CREATE INDEX lookup_key ON lookup(key);
 """
 
 
@@ -72,6 +62,15 @@ def open_input(path: Path):
     if path.suffix == ".gz":
         return gzip.open(path, "rt", encoding="utf-8")
     return open(path, "r", encoding="utf-8")
+
+
+def encode_data(data: dict) -> bytes:
+    text = json.dumps(data, ensure_ascii=False, separators=(",", ":"))
+    return zlib.compress(text.encode("utf-8"), 9)
+
+
+def decode_data(blob: bytes) -> dict:
+    return json.loads(zlib.decompress(blob))
 
 
 def _join_tags(tags) -> str | None:
@@ -85,27 +84,23 @@ def _first_ipa(entry: dict) -> str | None:
     return None
 
 
-def _senses(entry: dict) -> list[tuple]:
-    rows = []
+def _senses(entry: dict) -> list[dict]:
+    senses = []
     for sense in entry.get("senses", []):
         glosses = [g for g in sense.get("glosses", []) if g]
         if not glosses:
             continue
-        examples = [
-            e["text"]
-            for e in sense.get("examples", [])
-            if e.get("text")
-        ][:MAX_EXAMPLES_PER_SENSE]
+        out = {"glosses": glosses}
+        if sense.get("tags"):
+            out["tags"] = sense["tags"]
+        examples = [e["text"] for e in sense.get("examples", []) if e.get("text")]
+        if examples:
+            out["examples"] = examples[:MAX_EXAMPLES_PER_SENSE]
         form_of = [f["word"] for f in sense.get("form_of", []) if f.get("word")]
-        rows.append(
-            (
-                json.dumps(glosses, ensure_ascii=False),
-                _join_tags(sense.get("tags")),
-                json.dumps(examples, ensure_ascii=False) if examples else None,
-                json.dumps(form_of, ensure_ascii=False) if form_of else None,
-            )
-        )
-    return rows
+        if form_of:
+            out["form_of"] = form_of
+        senses.append(out)
+    return senses
 
 
 def _forms(entry: dict) -> list[dict]:
@@ -120,8 +115,24 @@ def _forms(entry: dict) -> list[dict]:
         if dedup_key in seen:
             continue
         seen.add(dedup_key)
-        forms.append(form | {"form": text})
+        forms.append({"form": text, "tags": tags, "raw_tags": form.get("raw_tags", [])})
     return forms
+
+
+def _group_forms(forms: list[dict]) -> list[dict]:
+    """Group consecutive forms sharing tags: a conjugation table becomes one
+    group per tense instead of repeating the tags on every person."""
+    groups = []
+    for (tags, raw_tags), run in itertools.groupby(
+        forms, key=lambda f: (tuple(f["tags"]), tuple(f["raw_tags"]))
+    ):
+        group = {"forms": [f["form"] for f in run]}
+        if tags:
+            group["tags"] = list(tags)
+        if raw_tags:
+            group["raw_tags"] = list(raw_tags)
+        groups.append(group)
+    return groups
 
 
 class PackBuilder:
@@ -130,11 +141,12 @@ class PackBuilder:
         self.lang = lang
         self.form_key = LANGUAGES[lang]["form_key"]
         self.next_id = 1
-        self.pending = {"entries": [], "senses": [], "forms": [], "lookup": []}
+        self.pending_entries: list[tuple] = []
+        self.pending_lookup: list[tuple] = []
         self.redirects: list[tuple[str, str]] = []
         # Entries that are only "form of X" ("lance": form of "lancer"). Their
         # targets are resolved once all headwords are known; the entry itself
-        # is then dropped, since X's forms table already describes it.
+        # is then dropped, since X's forms already describe it.
         self.form_of_links: list[tuple[int, str, str, str, str]] = []
         self.pure_form_ids: set[int] = set()
         self.headwords: dict[str, list[tuple[int, str]]] = {}
@@ -160,21 +172,15 @@ class PackBuilder:
         self.stats["entries"] += 1
         word = entry["word"]
         pos = entry.get("pos", "")
-        self.pending["entries"].append(
-            (entry_id, word, pos, _first_ipa(entry), _join_tags(entry.get("tags")))
-        )
-        self.pending["senses"].extend(
-            (entry_id, i, *row) for i, row in enumerate(senses)
-        )
-        self.pending["forms"].extend(
+        self.pending_entries.append(
             (
                 entry_id,
-                i,
-                f["form"],
-                _join_tags(f.get("tags")),
-                json.dumps(f["raw_tags"], ensure_ascii=False) if f.get("raw_tags") else None,
+                word,
+                pos,
+                _first_ipa(entry),
+                _join_tags(entry.get("tags")),
+                encode_data({"senses": senses, "forms": _group_forms(forms)}),
             )
-            for i, f in enumerate(forms)
         )
 
         headword_key = normalize(word)
@@ -185,38 +191,36 @@ class PackBuilder:
             # absolutely"): their words are already listed on their own.
             if key and " " not in key and key not in lookups:
                 lookups[key] = (KIND_FORM, i)
-        self.pending["lookup"].extend(
+        self.pending_lookup.extend(
             (key, entry_id, kind, ord_, None) for key, (kind, ord_) in lookups.items()
         )
 
-        if senses and all(sense[3] for sense in senses):
+        if senses and all("form_of" in sense for sense in senses):
             self.pure_form_ids.add(entry_id)
-            for glosses, _, _, form_of in senses:
-                note = json.loads(glosses)[-1]
-                for target in json.loads(form_of):
-                    self.form_of_links.append((entry_id, headword_key, pos, target, note))
+            for sense in senses:
+                for target in sense["form_of"]:
+                    self.form_of_links.append(
+                        (entry_id, headword_key, pos, target, sense["glosses"][-1])
+                    )
         else:
             self.headwords.setdefault(word, []).append((entry_id, pos))
 
-        if len(self.pending["entries"]) >= 10_000:
+        if len(self.pending_entries) >= 10_000:
             self.flush()
 
     def flush(self) -> None:
-        sql = {
-            "entries": "INSERT INTO entries (id, word, pos, ipa, tags) VALUES (?, ?, ?, ?, ?)",
-            "senses": "INSERT INTO senses (entry_id, ord, glosses, tags, examples, form_of)"
-            " VALUES (?, ?, ?, ?, ?, ?)",
-            "forms": "INSERT INTO forms (entry_id, ord, form, tags, raw_tags) VALUES (?, ?, ?, ?, ?)",
-            "lookup": "INSERT INTO lookup (key, entry_id, kind, form_ord, note) VALUES (?, ?, ?, ?, ?)",
-        }
-        for table, rows in self.pending.items():
-            self.conn.executemany(sql[table], rows)
-            rows.clear()
+        self.conn.executemany(
+            "INSERT INTO entries (id, word, pos, ipa, tags, data) VALUES (?, ?, ?, ?, ?, ?)",
+            self.pending_entries,
+        )
+        self.conn.executemany(
+            "INSERT INTO lookup_stage (key, entry_id, kind, form_ord, note) VALUES (?, ?, ?, ?, ?)",
+            self.pending_lookup,
+        )
+        self.pending_entries.clear()
+        self.pending_lookup.clear()
 
     def finish(self) -> None:
-        self.flush()
-        cur = self.conn.cursor()
-
         # "lance" is a form of "lancer": make the key "lance" reach lancer,
         # preferring targets with the same part of speech.
         unresolved = set()
@@ -226,34 +230,31 @@ class PackBuilder:
                 unresolved.add(entry_id)
                 continue
             same_pos = [c for c in candidates if c[1] == pos] or candidates
-            self.pending["lookup"].extend(
+            self.pending_lookup.extend(
                 (key, target_id, KIND_FORM_OF, None, note) for target_id, _ in same_pos
             )
         for title, target in self.redirects:
             if title:
-                self.pending["lookup"].extend(
+                self.pending_lookup.extend(
                     (normalize(title), target_id, KIND_REDIRECT, None, None)
                     for target_id, _ in self.headwords.get(target, [])
                 )
         self.flush()
 
+        cur = self.conn.cursor()
         dropped = self.pure_form_ids - unresolved
         self.stats["dropped_form_entries"] = len(dropped)
+        self.stats["entries"] -= len(dropped)
         cur.execute("CREATE TEMP TABLE dropped (id INTEGER PRIMARY KEY)")
         cur.executemany("INSERT INTO dropped (id) VALUES (?)", ((i,) for i in dropped))
         cur.execute("DELETE FROM entries WHERE id IN (SELECT id FROM dropped)")
-        for table in ("senses", "forms", "lookup"):
-            cur.execute(f"DELETE FROM {table} WHERE entry_id IN (SELECT id FROM dropped)")
-        self.stats["entries"] -= len(dropped)
-
         # A key may reach the same entry several ways; keep the most direct.
         cur.execute(
-            "DELETE FROM lookup WHERE rowid NOT IN ("
-            " SELECT rowid FROM (SELECT rowid, ROW_NUMBER() OVER ("
-            "  PARTITION BY key, entry_id ORDER BY kind, form_ord) AS n FROM lookup)"
-            " WHERE n = 1)"
+            "INSERT OR IGNORE INTO lookup (key, entry_id, kind, form_ord, note)"
+            " SELECT key, entry_id, kind, form_ord, note FROM lookup_stage"
+            " WHERE entry_id NOT IN (SELECT id FROM dropped)"
+            " ORDER BY key, entry_id, kind, form_ord"
         )
-        cur.executescript(INDEXES)
 
 
 def build(inputs: list[Path], lang: str, output: Path) -> dict:
@@ -266,6 +267,7 @@ def build(inputs: list[Path], lang: str, output: Path) -> dict:
     conn = sqlite3.connect(tmp)
     conn.execute("PRAGMA journal_mode = OFF")
     conn.execute("PRAGMA synchronous = OFF")
+    conn.execute("PRAGMA temp_store = FILE")
     conn.executescript(SCHEMA)
     builder = PackBuilder(conn, lang)
     started = time.monotonic()

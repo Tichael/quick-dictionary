@@ -21,43 +21,57 @@ packs are distributed separately from the MIT-licensed code.
 | `license`        | `CC BY-SA 4.0 (…)`                          |
 | `built_at`       | `2026-10-22T14:00:00+00:00`                 |
 
-### `entries(id, word, pos, ipa, tags)`
+### `entries(id, word, pos, ipa, tags, data)`
 
-One row per word *and* part of speech: "lance" (noun) and "lance" (verb form)
+One row per word *and* part of speech: "lance" (noun) and "lancer" (verb)
 are separate entries. `pos` uses wiktextract's English codes (`noun`,
 `verb`, `adj`, …). `ipa` is the first pronunciation listed. `tags` is a
 space-separated list (`feminine`, …).
 
-### `senses(entry_id, ord, glosses, tags, examples, form_of)`
+`data` is zlib-compressed UTF-8 JSON. The app always reads an entry as a
+whole, and compression shrinks conjugation tables about 7×:
 
-The definitions, in Wiktionary order (`ord`).
+```json
+{
+  "senses": [
+    {
+      "glosses": ["Se déplacer jusqu'à un endroit."],
+      "tags": ["figuratively"],
+      "examples": ["…"],
+      "form_of": ["…"]
+    }
+  ],
+  "forms": [
+    {"tags": ["indicative", "present"],
+     "forms": ["je vais", "tu vas", "il/elle/on va", "nous allons", "vous allez", "ils/elles vont"]},
+    {"raw_tags": ["Passé simple"], "forms": ["…"]}
+  ]
+}
+```
 
-- `glosses`: a JSON array going from general to specific. A sub-sense
-  lists its parent first. Display the last item, with the earlier ones as
-  context.
-- `examples`: a JSON array of at most 2 sentences, or NULL.
-- `form_of`: a JSON array of headwords this sense is an inflection of
-  (`["lancer"]` for "lance"), or NULL.
+Only `glosses` and `forms` (inside a group) are always present. The other
+keys are left out when empty.
 
-### `forms(entry_id, ord, form, tags, raw_tags)`
-
-Plurals, feminines, and full conjugation tables, in source order. The
-order matters: conjugation forms carry only mood and tense tags (e.g.
-`indicative present`). The person is implied by the row's position and is
-written into the form itself (`je lance`, `nous lançons`). When the
-extractor could not map a header to a tag, the original French header is
-in `raw_tags` (JSON array, e.g. `["Passé simple"]`).
+- **Senses** are the definitions, in Wiktionary order. `glosses` goes from
+  general to specific: a sub-sense lists its parent first. Display the last
+  item, with the earlier ones as context. `examples` holds at most 2
+  sentences. `form_of` lists the headwords this sense is an inflection of.
+- **Forms** are plurals, feminines and full conjugation tables, in source
+  order. Consecutive forms with the same tags are grouped. Conjugation
+  forms carry only mood and tense tags (`indicative present`), and the
+  person is written into the form itself (`je vais`). When the extractor
+  could not map a header to a tag, the original header is in `raw_tags`.
 
 ### `lookup(key, entry_id, kind, form_ord, note)`
 
-The search index. `key` is a normalized search string (see below). `note`
-is only set on form-of rows, and holds the gloss that made the link
-("plural of goose").
+The search index (primary key `(key, entry_id)`). `key` is a normalized
+search string (see below). `note` is only set on form-of rows, and holds
+the gloss that made the link ("plural of goose").
 
 | kind | meaning                                                         |
 |------|-----------------------------------------------------------------|
 | 0    | headword: the key is the entry's own word                       |
-| 1    | inflected form: the key is `forms[form_ord]` of the entry       |
+| 1    | inflected form: `form_ord` is the matched form's index, counted across groups |
 | 2    | form-of: the key is a word whose sense says it's a form of this one |
 | 3    | redirect: a Wiktionary redirect page title points to this entry |
 

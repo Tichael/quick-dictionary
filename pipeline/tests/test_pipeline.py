@@ -4,7 +4,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from qd_pipeline.build import KIND_FORM, KIND_FORM_OF, KIND_HEADWORD, KIND_REDIRECT, build
+from qd_pipeline.build import KIND_FORM, KIND_FORM_OF, KIND_HEADWORD, KIND_REDIRECT, build, decode_data
 from qd_pipeline.languages import LANGUAGES
 from qd_pipeline.normalize import normalize
 
@@ -77,15 +77,20 @@ class BuildTest(unittest.TestCase):
         self.assertEqual(self.find(conn, "ai lance"), [])
         self.assertEqual(self.find(conn, "school"), [])
 
-        (forms,) = conn.execute(
-            "SELECT COUNT(*) FROM forms f JOIN entries e ON e.id = f.entry_id WHERE e.word = 'lancer'"
-        ).fetchone()
-        self.assertEqual(forms, 8)  # the duplicated participle is stored once
-        (examples,) = conn.execute(
-            "SELECT examples FROM senses s JOIN entries e ON e.id = s.entry_id"
-            " WHERE e.word = 'lancer' AND s.ord = 0"
-        ).fetchone()
-        self.assertEqual(json.loads(examples), ["Lancer une pierre.", "Lancer un javelot."])
+        (blob,) = conn.execute("SELECT data FROM entries WHERE word = 'lancer'").fetchone()
+        data = decode_data(blob)
+        self.assertEqual(data["senses"][0]["examples"], ["Lancer une pierre.", "Lancer un javelot."])
+        self.assertEqual(
+            data["forms"][:3],
+            [
+                {"forms": ["lancer"], "tags": ["infinitive", "present"]},
+                {"forms": ["avoir lancé"], "tags": ["infinitive", "past"]},
+                {"forms": ["je lance", "nous lançons"], "tags": ["indicative", "present"]},
+            ],
+        )
+        # The duplicated participle is stored once.
+        self.assertEqual(sum(len(g["forms"]) for g in data["forms"]), 8)
+        self.assertEqual(data["forms"][-1], {"forms": ["nous lançâmes"], "raw_tags": ["Passé simple"]})
 
     def test_french_redirect(self):
         # "Lancer" normalizes to the same key as "lancer", so it adds nothing new.
@@ -102,10 +107,9 @@ class BuildTest(unittest.TestCase):
         )
         self.assertEqual(self.find(conn, "children"), [("child", "noun", KIND_FORM)])
         self.assertEqual(self.find(conn, "cafe"), [("café", "noun", KIND_HEADWORD)])
-        (template_forms,) = conn.execute(
-            "SELECT COUNT(*) FROM forms WHERE form IN ('en-verb', 'go')"
-        ).fetchone()
-        self.assertEqual(template_forms, 0)
+        (blob,) = conn.execute("SELECT data FROM entries WHERE word = 'go'").fetchone()
+        forms = [f for g in decode_data(blob)["forms"] for f in g["forms"]]
+        self.assertEqual(forms, ["goes", "going", "went", "gone"])  # template rows dropped
 
     def test_form_of_without_forms_table(self):
         # "goose" lists no forms; only the "geese" entry links back to it.

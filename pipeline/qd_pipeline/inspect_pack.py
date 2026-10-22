@@ -6,10 +6,10 @@ Usage:
 """
 
 import argparse
-import json
 import sqlite3
 from pathlib import Path
 
+from .build import decode_data
 from .normalize import normalize
 
 KIND_LABELS = {0: "headword", 1: "inflected form", 2: "form of", 3: "redirect"}
@@ -18,7 +18,7 @@ KIND_LABELS = {0: "headword", 1: "inflected form", 2: "form of", 3: "redirect"}
 def stats(conn: sqlite3.Connection) -> None:
     for key, value in conn.execute("SELECT key, value FROM meta ORDER BY key"):
         print(f"{key:>15}: {value}")
-    for table in ("entries", "senses", "forms", "lookup"):
+    for table in ("entries", "lookup"):
         (count,) = conn.execute(f"SELECT COUNT(*) FROM {table}").fetchone()
         print(f"{table:>15}: {count:,} rows")
     print("\nTop parts of speech:")
@@ -28,10 +28,18 @@ def stats(conn: sqlite3.Connection) -> None:
         print(f"  {pos or '(none)':<20} {count:,}")
 
 
+def flat_forms(data: dict) -> list[tuple[str, list[str], list[str]]]:
+    return [
+        (form, group.get("tags", []), group.get("raw_tags", []))
+        for group in data["forms"]
+        for form in group["forms"]
+    ]
+
+
 def lookup(conn: sqlite3.Connection, query: str) -> None:
     key = normalize(query)
     rows = conn.execute(
-        "SELECT l.entry_id, l.kind, l.form_ord, l.note, e.word, e.pos, e.ipa"
+        "SELECT l.kind, l.form_ord, l.note, e.word, e.pos, e.ipa, e.tags, e.data"
         " FROM lookup l JOIN entries e ON e.id = l.entry_id"
         " WHERE l.key = ? ORDER BY l.kind, e.id",
         (key,),
@@ -39,35 +47,24 @@ def lookup(conn: sqlite3.Connection, query: str) -> None:
     if not rows:
         print(f"No match for {query!r} (key {key!r})")
         return
-    for entry_id, kind, form_ord, note, word, pos, ipa in rows:
-        print(f"\n== {word} ({pos}) {ipa or ''}  [{KIND_LABELS[kind]}]")
+    for kind, form_ord, note, word, pos, ipa, tags, blob in rows:
+        data = decode_data(blob)
+        print(f"\n== {word} ({pos}{', ' + tags if tags else ''}) {ipa or ''}  [{KIND_LABELS[kind]}]")
         if note:
             print(f"   note: {note}")
         if form_ord is not None:
-            form, tags = conn.execute(
-                "SELECT form, tags FROM forms WHERE entry_id = ? AND ord = ?",
-                (entry_id, form_ord),
-            ).fetchone()
-            print(f"   matched: {form}  ({tags or 'no tags'})")
-        for glosses, tags, examples in conn.execute(
-            "SELECT glosses, tags, examples FROM senses WHERE entry_id = ? ORDER BY ord",
-            (entry_id,),
-        ):
-            label = f" [{tags}]" if tags else ""
-            print(f"   - {' › '.join(json.loads(glosses))}{label}")
-            for example in json.loads(examples or "[]"):
+            form, form_tags, raw_tags = flat_forms(data)[form_ord]
+            print(f"   matched: {form}  ({' '.join(form_tags + raw_tags) or 'no tags'})")
+        for sense in data["senses"]:
+            label = f" [{' '.join(sense['tags'])}]" if sense.get("tags") else ""
+            print(f"   - {' › '.join(sense['glosses'])}{label}")
+            for example in sense.get("examples", []):
                 print(f"       « {example} »")
-        forms = conn.execute(
-            "SELECT form, tags, raw_tags FROM forms WHERE entry_id = ? ORDER BY ord",
-            (entry_id,),
-        ).fetchall()
-        if forms:
-            print(f"   forms ({len(forms)}):")
-            for form, tags, raw_tags in forms[:60]:
-                raw = f"  raw={json.loads(raw_tags)}" if raw_tags else ""
-                print(f"     {form:<30} {tags or ''}{raw}")
-            if len(forms) > 60:
-                print(f"     … {len(forms) - 60} more")
+        if data["forms"]:
+            print(f"   forms ({len(flat_forms(data))}):")
+            for group in data["forms"]:
+                label = " ".join(group.get("tags", []) + group.get("raw_tags", []))
+                print(f"     [{label}] {' · '.join(group['forms'])}")
 
 
 def main(argv=None) -> None:
