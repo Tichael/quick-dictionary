@@ -51,6 +51,16 @@
   --danger: #ff7a70;
 }
 
+/* With "Same as the system", follow the system accent color too (the one
+   picked in Windows' personalization settings), where the webview has it. */
+@supports (color: AccentColor) {
+  :root:not([data-theme]) {
+    --accent: AccentColor;
+    --accent-text: AccentColorText;
+    --bg-selected: color-mix(in srgb, AccentColor 18%, var(--bg));
+  }
+}
+
 * { box-sizing: border-box; }
 
 html, body {
