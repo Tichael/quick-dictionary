@@ -10,13 +10,30 @@
 <body>
   <!-- Texts are replaced by the interface language's (see i18n.js). -->
   <nav>
-    <a href="#general" class="current" data-i18n="nav.general">General</a>
+    <a href="#dictionaries" class="current" data-i18n="nav.dictionaries">Dictionaries</a>
+    <a href="#general" data-i18n="nav.general">General</a>
     <a href="#behavior" data-i18n="nav.behavior">Behavior</a>
-    <a href="#dictionaries" data-i18n="nav.dictionaries">Dictionaries</a>
     <a href="#about" data-i18n="nav.about">About</a>
   </nav>
   <main>
     <div id="message" hidden></div>
+
+    <section id="dictionaries">
+      <h2 data-i18n="dictionaries.title">Dictionaries</h2>
+      <p class="hint" data-i18n-html="dictionaries.hint"></p>
+      <h3 data-i18n="dictionaries.availableTitle">Available to download</h3>
+      <div id="downloads"></div>
+      <button id="check-downloads" class="link" data-i18n="dictionaries.checkAgain">Check again</button>
+
+      <h3 data-i18n="dictionaries.installedTitle">Installed</h3>
+      <div id="packs"></div>
+      <div class="actions">
+        <button id="add-pack" class="primary" data-i18n="dictionaries.add">Add a dictionary file…</button>
+        <button id="open-folder" data-i18n="dictionaries.openFolder">Open the dictionaries folder</button>
+        <button id="reload" data-i18n="dictionaries.reload">Reload</button>
+      </div>
+      <p class="hint" id="packs-dir"></p>
+    </section>
 
     <section id="general">
       <h2 data-i18n="general.title">General</h2>
@@ -83,22 +100,6 @@
         <div class="label" data-i18n="behavior.maxResults">Results per search</div>
         <input type="number" min="1" max="50" data-setting="maxResults">
       </label>
-    </section>
-
-    <section id="dictionaries">
-      <h2 data-i18n="dictionaries.title">Dictionaries</h2>
-      <p class="hint" data-i18n-html="dictionaries.hint"></p>
-      <div id="packs"></div>
-      <div class="actions">
-        <button id="add-pack" class="primary" data-i18n="dictionaries.add">Add a dictionary file…</button>
-        <button id="open-folder" data-i18n="dictionaries.openFolder">Open the dictionaries folder</button>
-        <button id="reload" data-i18n="dictionaries.reload">Reload</button>
-      </div>
-      <p class="hint" id="packs-dir"></p>
-
-      <h3 data-i18n="dictionaries.availableTitle">Available to download</h3>
-      <div id="downloads"></div>
-      <button id="check-downloads" class="link" data-i18n="dictionaries.checkAgain">Check again</button>
     </section>
 
     <section id="about">
