@@ -150,10 +150,6 @@ function mark(form, matched) {
   return isMatch(form, matched) ? `<mark>${esc(form)}</mark>` : esc(form);
 }
 
-function formList(forms, matched) {
-  return forms.map((f) => `<div class="form">${mark(f, matched)}</div>`).join("");
-}
-
 /** Splits forms into conjugation tenses (by tag key) and everything else. */
 function splitForms(entry, keys) {
   const tenses = new Map();
@@ -178,50 +174,150 @@ function otherForms(lang, groups, matched, title) {
   return `<h4>${esc(title)}</h4><table class="forms">${rows}</table>`;
 }
 
+/** A tense tile: its name and its forms, or an empty cell. */
+function tenseTile(name, forms, isHit) {
+  if (!forms) return `<div class="tense empty"></div>`;
+  const hit = forms.some(isHit);
+  const list = forms.map((f) => `<div class="form">${isHit(f) ? `<mark>${esc(f)}</mark>` : esc(f)}</div>`).join("");
+  return `<div class="tense${hit ? " hit" : ""}"><div class="tense-name">${esc(name)}</div>${list}</div>`;
+}
+
+/** The moods of a conjugation, as [mood name, tiles html, tile count]. Moods
+ * of one or two tenses take half the width, two side by side. */
+function moodGrid(moods) {
+  const html = moods
+    .filter(([, tiles]) => tiles)
+    .map(([mood, tiles, count]) => `<div class="mood${count <= 2 ? " half" : ""}">
+      <div class="mood-name">${esc(mood)}</div><div class="tenses">${tiles}</div></div>`)
+    .join("");
+  return `<div class="moods">${html}</div>`;
+}
+
 function frenchConjugation(entry, matched) {
   const keys = new Set(FR_CONJUGATION.flatMap(([, rows]) => moodTenses(rows).map(([k]) => key(k))));
   const { tenses, other } = splitForms(entry, keys);
   if (tenses.size < 4) return null;
 
-  const tile = (tense) => {
-    const group = tense && tenses.get(key(tense[0]));
-    if (!group) return `<div class="tense empty"></div>`;
-    const hit = group.forms.some((f) => isMatch(f, matched));
-    return `<div class="tense${hit ? " hit" : ""}">
-      <div class="tense-name">${esc(tense[1])}</div>${formList(group.forms, matched)}</div>`;
-  };
+  const isHit = (f) => isMatch(f, matched);
+  const tile = (tense) => tenseTile(tense?.[1], tense && tenses.get(key(tense[0]))?.forms, isHit);
 
   const aux = tenses.get(key("infinitive past"))?.forms[0]?.split(" ")[0];
   const auxLabel = aux ? ` <span class="faint">· ${esc(t("entry.auxiliary", { aux }))}</span>` : "";
   let html = `<h4>${esc(t("entry.conjugation"))}${auxLabel}</h4>`;
-  html += `<div class="moods">`;
-  for (const [mood, rows] of FR_CONJUGATION) {
+  html += moodGrid(FR_CONJUGATION.map(([mood, rows]) => {
     // A row shows when either of its tenses is known, so that simple and
     // compound tenses stay side by side.
-    const tiles = rows
-      .filter((row) => row.some((tense) => tense && tenses.has(key(tense[0]))))
-      .map(([simple, compound]) => tile(simple) + tile(compound))
-      .join("");
-    // Moods of a single row take half the width, two side by side.
-    const half = rows.length === 1 ? " half" : "";
-    if (tiles) html += `<div class="mood${half}"><div class="mood-name">${esc(mood)}</div><div class="tenses">${tiles}</div></div>`;
-  }
-  html += `</div>`;
+    const shown = rows.filter((row) => row.some((tense) => tense && tenses.has(key(tense[0]))));
+    return [mood, shown.map(([simple, compound]) => tile(simple) + tile(compound)).join(""), shown.length * 2];
+  }));
   html += otherForms("fr", other, matched, t("entry.otherForms"));
   return html;
+}
+
+const EN_PERSONS = ["I", "you", "he/she/it", "we", "you", "they"];
+
+// "Be" is the only verb whose present and past change with the person
+// beyond the third person singular.
+const EN_BE = {
+  present: ["am", "are", "is", "are", "are", "are"],
+  past: ["was", "were", "was", "were", "were", "were"],
+};
+
+/** The full English conjugation, built from the principal parts the way
+ * online conjugators show it: each time (present, past, future, conditional)
+ * in simple, continuous, perfect and perfect continuous forms. Null when a
+ * principal part is missing (modal verbs such as "can"). */
+function englishConjugation(entry, tenses) {
+  const parts = Object.fromEntries(EN_PRINCIPAL_PARTS.map(([k]) => [k, tenses.get(key(k))?.forms]));
+  const third = parts["present singular third-person"];
+  const ing = parts["participle present"];
+  const past = parts["past"];
+  const pp = parts["participle past"];
+  if (!third || !ing || !past || !pp) return null;
+
+  // Spelling variants ("learned", "learnt") share one line.
+  const [thirdV, ingV, pastV, ppV] = [third, ing, past, pp].map((forms) => forms.join(" / "));
+  const base = entry.word;
+  const be = base === "be";
+  const persons = (verb) => EN_PERSONS.map((p, i) => `${p} ${typeof verb === "function" ? verb(i) : verb}`);
+
+  const present = persons((i) => (be ? EN_BE.present[i] : i === 2 ? thirdV : base));
+  const beNow = persons((i) => EN_BE.present[i]);
+  const havePresent = persons((i) => (i === 2 ? "has" : "have"));
+  const add = (forms, rest) => forms.map((f) => `${f} ${rest}`);
+
+  const moods = [
+    ["Indicative", [
+      ["Present", present],
+      ["Present continuous", add(beNow, ingV)],
+      ["Present perfect", add(havePresent, ppV)],
+      ["Present perfect continuous", add(havePresent, `been ${ingV}`)],
+      ["Past", persons((i) => (be ? EN_BE.past[i] : pastV))],
+      ["Past continuous", persons((i) => `${EN_BE.past[i]} ${ingV}`)],
+      ["Past perfect", persons(`had ${ppV}`)],
+      ["Past perfect continuous", persons(`had been ${ingV}`)],
+      ["Future", persons(`will ${base}`)],
+      ["Future continuous", persons(`will be ${ingV}`)],
+      ["Future perfect", persons(`will have ${ppV}`)],
+      ["Future perfect continuous", persons(`will have been ${ingV}`)],
+    ]],
+    ["Conditional", [
+      ["Present", persons(`would ${base}`)],
+      ["Continuous", persons(`would be ${ingV}`)],
+      ["Perfect", persons(`would have ${ppV}`)],
+      ["Perfect continuous", persons(`would have been ${ingV}`)],
+    ]],
+    ["Imperative", [
+      ["Affirmative", [base, `let's ${base}`, base]],
+      ["Negative", [`don't ${base}`, `let's not ${base}`, `don't ${base}`]],
+    ]],
+    ["Infinitive", [
+      ["Present", [`to ${base}`]],
+      ["Perfect", [`to have ${ppV}`]],
+    ]],
+    ["Participle", [
+      ["Present", [ingV]],
+      ["Past", [ppV]],
+    ]],
+  ];
+  return moods;
+}
+
+/** Whether an English line ("he/she/it goes") is the form looked up. Only
+ * simple tenses count: "gone" lights up the participle, not every perfect. */
+function englishHit(line, matched) {
+  if (matched == null) return false;
+  const verb = line.replace(/^(?:I|you|he\/she\/it|we|they|to) /, "");
+  return verb.split(" / ").some((v) => v.toLowerCase() === matched.toLowerCase());
 }
 
 function englishVerb(entry, matched) {
   const keys = new Set(EN_PRINCIPAL_PARTS.map(([k]) => key(k)));
   const { tenses, other } = splitForms(entry, keys);
   if (!tenses.size) return null;
-  const rows = [["Infinitive", [entry.word]]]
-    .concat(EN_PRINCIPAL_PARTS
-      .filter(([k]) => tenses.has(key(k)))
-      .map(([k, label]) => [label, tenses.get(key(k)).forms]))
-    .map(([label, forms]) => `<tr><th>${esc(label)}</th><td>${forms.map((f) => mark(f, matched)).join(", ")}</td></tr>`)
-    .join("");
-  let html = `<h4>${esc(t("entry.conjugation"))}</h4><table class="forms">${rows}</table>`;
+  const moods = englishConjugation(entry, tenses);
+  let html;
+  if (moods) {
+    // Principal parts in the heading, as in irregular verb lists: go – went – gone.
+    const principal = [[entry.word], tenses.get(key("past")).forms, tenses.get(key("participle past")).forms]
+      .map((forms) => forms.join("/"))
+      .join(" – ");
+    const isHit = (f) => englishHit(f, matched);
+    html = `<h4>${esc(t("entry.conjugation"))} <span class="faint">· ${esc(principal)}</span></h4>`;
+    html += moodGrid(moods.map(([mood, list]) => [
+      mood,
+      list.map(([name, forms]) => tenseTile(name, forms, isHit)).join(""),
+      list.length,
+    ]));
+  } else {
+    const rows = [["Infinitive", [entry.word]]]
+      .concat(EN_PRINCIPAL_PARTS
+        .filter(([k]) => tenses.has(key(k)))
+        .map(([k, label]) => [label, tenses.get(key(k)).forms]))
+      .map(([label, forms]) => `<tr><th>${esc(label)}</th><td>${forms.map((f) => mark(f, matched)).join(", ")}</td></tr>`)
+      .join("");
+    html = `<h4>${esc(t("entry.conjugation"))}</h4><table class="forms">${rows}</table>`;
+  }
   if (other.length) {
     const summary = esc(t("entry.otherFormsCount", { n: other.length }));
     html += `<details><summary>${summary}</summary>${otherForms("en", other, matched, "")}</details>`;
