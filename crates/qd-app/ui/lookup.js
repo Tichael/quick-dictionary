@@ -144,8 +144,6 @@ document.addEventListener("click", (event) => {
   } else if (target.closest(".toggle-senses")) {
     target.closest(".result").querySelector(".senses").classList.add("all");
     target.remove();
-  } else if (target.closest(".toggle-compound")) {
-    target.closest(".conjugation").classList.add("show-compound");
   } else if (target.closest(".example")) {
     target.closest(".example").classList.toggle("open");
   } else if (target.closest("#open-dictionaries") || target.closest("#settings")) {
