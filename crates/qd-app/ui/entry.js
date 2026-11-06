@@ -45,9 +45,9 @@ const TAGS = {
   },
 };
 
-// French conjugation, laid out like a conjugation book: each mood lists its
-// simple tenses on the left and the matching compound tense on the right
-// (présent / passé composé, imparfait / plus-que-parfait…). Tenses are keyed
+// French conjugation, laid out like a conjugation book: each simple tense is
+// followed by its compound tense (présent / passé composé, imparfait /
+// plus-que-parfait…), so the pairs line up in the columns. Tenses are keyed
 // by the tags of their forms.
 const FR_CONJUGATION = [
   ["Indicatif", [
@@ -66,13 +66,19 @@ const FR_CONJUGATION = [
   ["Impératif", [
     [["imperative present", "Présent"], ["imperative past", "Passé"]],
   ]],
-  // Tense names here are complete on their own ("Participe passé").
-  ["Modes impersonnels", [
-    [["infinitive present", "Infinitif présent"], ["infinitive past", "Infinitif passé"]],
-    [["participle present", "Participe présent"], ["participle past", "Participe passé"]],
-    [["gerund present", "Gérondif présent"], ["gerund past", "Gérondif passé"]],
+  ["Participe", [
+    [["participle present", "Présent"], ["participle past", "Passé"]],
+  ]],
+  ["Infinitif", [
+    [["infinitive present", "Présent"], ["infinitive past", "Passé"]],
+  ]],
+  ["Gérondif", [
+    [["gerund present", "Présent"], ["gerund past", "Passé"]],
   ]],
 ];
+
+// Moods named with their tense in one phrase: "Participe passé".
+const FR_IMPERSONAL = new Set(["Participe", "Infinitif", "Gérondif"]);
 
 /** Every tense of a mood, simple and compound, as [tags, name]. */
 const moodTenses = (rows) => rows.flat().filter(Boolean);
@@ -107,7 +113,7 @@ function knownTense(lang, tags) {
     const wanted = tagKey(tags);
     for (const [mood, rows] of FR_CONJUGATION) {
       for (const [k, name] of moodTenses(rows)) {
-        if (key(k) === wanted) return mood === "Modes impersonnels" ? name : `${mood} · ${name}`;
+        if (key(k) === wanted) return FR_IMPERSONAL.has(mood) ? `${mood} ${name.toLowerCase()}` : `${mood} · ${name}`;
       }
     }
   }
@@ -145,7 +151,7 @@ function mark(form, matched) {
 }
 
 function formList(forms, matched) {
-  return forms.map((f) => mark(f, matched)).join("<br>");
+  return forms.map((f) => `<div class="form">${mark(f, matched)}</div>`).join("");
 }
 
 /** Splits forms into conjugation tenses (by tag key) and everything else. */
@@ -188,6 +194,7 @@ function frenchConjugation(entry, matched) {
   const aux = tenses.get(key("infinitive past"))?.forms[0]?.split(" ")[0];
   const auxLabel = aux ? ` <span class="faint">· ${esc(t("entry.auxiliary", { aux }))}</span>` : "";
   let html = `<h4>${esc(t("entry.conjugation"))}${auxLabel}</h4>`;
+  html += `<div class="moods">`;
   for (const [mood, rows] of FR_CONJUGATION) {
     // A row shows when either of its tenses is known, so that simple and
     // compound tenses stay side by side.
@@ -195,8 +202,11 @@ function frenchConjugation(entry, matched) {
       .filter((row) => row.some((tense) => tense && tenses.has(key(tense[0]))))
       .map(([simple, compound]) => tile(simple) + tile(compound))
       .join("");
-    if (tiles) html += `<div class="mood"><div class="mood-name">${esc(mood)}</div><div class="tenses">${tiles}</div></div>`;
+    // Moods of a single row take half the width, two side by side.
+    const half = rows.length === 1 ? " half" : "";
+    if (tiles) html += `<div class="mood${half}"><div class="mood-name">${esc(mood)}</div><div class="tenses">${tiles}</div></div>`;
   }
+  html += `</div>`;
   html += otherForms("fr", other, matched, t("entry.otherForms"));
   return html;
 }

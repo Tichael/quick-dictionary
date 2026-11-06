@@ -147,23 +147,45 @@ table.forms th {
 }
 table.forms td { padding: 2px 0; }
 
-.mood { margin-bottom: 10px; }
-.mood-name { font-weight: 600; margin-bottom: 4px; }
+/* Four columns, as in a conjugation book: simple and compound tenses side
+   by side. Moods of one row (conditionnel, impératif…) take two columns.
+   Narrow windows fall back to two columns. */
+.conjugation { container-type: inline-size; }
+.moods {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  column-gap: 10px;
+}
+.mood { grid-column: span 4; margin-bottom: 8px; }
+.mood.half { grid-column: span 2; }
+.mood-name {
+  font-weight: 600;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 2px;
+  margin-bottom: 4px;
+}
 .tenses {
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 6px;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 6px 10px;
 }
+.mood.half .tenses { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .tense {
-  background: var(--bg);
-  border: 1px solid var(--border);
-  border-radius: 6px;
-  padding: 6px 8px;
+  font-size: 13px;
   line-height: 1.45;
+  border-radius: 4px;
+  margin: -2px -4px;
+  padding: 2px 4px;
+  overflow-wrap: anywhere;
 }
-.tense.hit { border-color: var(--accent); }
+/* A long form wraps with a hanging indent, to stay apart from the next. */
+.tense .form { padding-left: 1em; text-indent: -1em; }
+.tense.hit { box-shadow: inset 0 0 0 1px var(--accent); }
 .tense-name { font-size: 12px; color: var(--accent); font-weight: 600; }
-.tense.empty { visibility: hidden; }
+@container (max-width: 460px) {
+  .mood, .mood.half { grid-column: 1 / -1; }
+  .tenses { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+}
 
 mark { background: var(--highlight); color: inherit; border-radius: 2px; padding: 0 1px; }
 
