@@ -229,7 +229,7 @@ fn toggle_lookup(app: &AppHandle) {
 fn create_lookup(app: &AppHandle) -> tauri::Result<()> {
     WebviewWindowBuilder::new(app, LOOKUP, WebviewUrl::App("lookup.html".into()))
         .title("Quick Dictionary")
-        .inner_size(580.0, 560.0)
+        .inner_size(720.0, 560.0)
         .min_inner_size(380.0, 220.0)
         .decorations(false)
         .visible(false)
