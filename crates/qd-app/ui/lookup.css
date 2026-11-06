@@ -151,7 +151,7 @@ table.forms td { padding: 2px 0; }
 .mood-name { font-weight: 600; margin-bottom: 4px; }
 .tenses {
   display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(165px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 6px;
 }
 .tense {
@@ -163,8 +163,7 @@ table.forms td { padding: 2px 0; }
 }
 .tense.hit { border-color: var(--accent); }
 .tense-name { font-size: 12px; color: var(--accent); font-weight: 600; }
-.conjugation:not(.show-compound) .tense.compound { display: none; }
-.conjugation.show-compound .toggle-compound { display: none; }
+.tense.empty { visibility: hidden; }
 
 mark { background: var(--highlight); color: inherit; border-radius: 2px; padding: 0 1px; }
 

@@ -45,42 +45,37 @@ const TAGS = {
   },
 };
 
-// French conjugation, in the order of a conjugation book, keyed by the
-// tags of each tense's forms. `true` marks compound tenses.
+// French conjugation, laid out like a conjugation book: each mood lists its
+// simple tenses on the left and the matching compound tense on the right
+// (présent / passé composé, imparfait / plus-que-parfait…). Tenses are keyed
+// by the tags of their forms.
 const FR_CONJUGATION = [
   ["Indicatif", [
-    ["indicative present", "Présent"],
-    ["indicative imperfect", "Imparfait"],
-    ["indicative past", "Passé simple"],
-    ["indicative future", "Futur simple"],
-    ["indicative past multiword-construction", "Passé composé", true],
-    ["indicative pluperfect", "Plus-que-parfait", true],
-    ["indicative past anterior", "Passé antérieur", true],
-    ["indicative future perfect", "Futur antérieur", true],
+    [["indicative present", "Présent"], ["indicative past multiword-construction", "Passé composé"]],
+    [["indicative imperfect", "Imparfait"], ["indicative pluperfect", "Plus-que-parfait"]],
+    [["indicative past", "Passé simple"], ["indicative past anterior", "Passé antérieur"]],
+    [["indicative future", "Futur simple"], ["indicative future perfect", "Futur antérieur"]],
   ]],
   ["Subjonctif", [
-    ["subjunctive present", "Présent"],
-    ["subjunctive imperfect", "Imparfait"],
-    ["subjunctive past", "Passé", true],
-    ["subjunctive pluperfect", "Plus-que-parfait", true],
+    [["subjunctive present", "Présent"], ["subjunctive past", "Passé"]],
+    [["subjunctive imperfect", "Imparfait"], ["subjunctive pluperfect", "Plus-que-parfait"]],
   ]],
   ["Conditionnel", [
-    ["conditional present", "Présent"],
-    ["conditional past", "Passé", true],
+    [["conditional present", "Présent"], ["conditional past", "Passé"]],
   ]],
   ["Impératif", [
-    ["imperative present", "Présent"],
-    ["imperative past", "Passé", true],
+    [["imperative present", "Présent"], ["imperative past", "Passé"]],
   ]],
+  // Tense names here are complete on their own ("Participe passé").
   ["Modes impersonnels", [
-    ["infinitive present", "Infinitif"],
-    ["participle present", "Participe présent"],
-    ["participle past", "Participe passé"],
-    ["gerund present", "Gérondif"],
-    ["infinitive past", "Infinitif passé", true],
-    ["gerund past", "Gérondif passé", true],
+    [["infinitive present", "Infinitif présent"], ["infinitive past", "Infinitif passé"]],
+    [["participle present", "Participe présent"], ["participle past", "Participe passé"]],
+    [["gerund present", "Gérondif présent"], ["gerund past", "Gérondif passé"]],
   ]],
 ];
+
+/** Every tense of a mood, simple and compound, as [tags, name]. */
+const moodTenses = (rows) => rows.flat().filter(Boolean);
 
 const EN_PRINCIPAL_PARTS = [
   ["present singular third-person", "3rd person singular"],
@@ -110,8 +105,8 @@ function groupTags(group) {
 function knownTense(lang, tags) {
   if (lang === "fr") {
     const wanted = tagKey(tags);
-    for (const [mood, tenses] of FR_CONJUGATION) {
-      for (const [k, name] of tenses) {
+    for (const [mood, rows] of FR_CONJUGATION) {
+      for (const [k, name] of moodTenses(rows)) {
         if (key(k) === wanted) return mood === "Modes impersonnels" ? name : `${mood} · ${name}`;
       }
     }
@@ -178,26 +173,30 @@ function otherForms(lang, groups, matched, title) {
 }
 
 function frenchConjugation(entry, matched) {
-  const keys = new Set(FR_CONJUGATION.flatMap(([, tenses]) => tenses.map(([k]) => key(k))));
+  const keys = new Set(FR_CONJUGATION.flatMap(([, rows]) => moodTenses(rows).map(([k]) => key(k))));
   const { tenses, other } = splitForms(entry, keys);
   if (tenses.size < 4) return null;
+
+  const tile = (tense) => {
+    const group = tense && tenses.get(key(tense[0]));
+    if (!group) return `<div class="tense empty"></div>`;
+    const hit = group.forms.some((f) => isMatch(f, matched));
+    return `<div class="tense${hit ? " hit" : ""}">
+      <div class="tense-name">${esc(tense[1])}</div>${formList(group.forms, matched)}</div>`;
+  };
 
   const aux = tenses.get(key("infinitive past"))?.forms[0]?.split(" ")[0];
   const auxLabel = aux ? ` <span class="faint">· ${esc(t("entry.auxiliary", { aux }))}</span>` : "";
   let html = `<h4>${esc(t("entry.conjugation"))}${auxLabel}</h4>`;
-  for (const [mood, list] of FR_CONJUGATION) {
-    const tiles = list
-      .filter(([k]) => tenses.has(key(k)))
-      .map(([k, name, compound]) => {
-        const group = tenses.get(key(k));
-        const hit = group.forms.some((f) => isMatch(f, matched));
-        return `<div class="tense${compound ? " compound" : ""}${hit ? " hit" : ""}">
-          <div class="tense-name">${esc(name)}</div>${formList(group.forms, matched)}</div>`;
-      })
+  for (const [mood, rows] of FR_CONJUGATION) {
+    // A row shows when either of its tenses is known, so that simple and
+    // compound tenses stay side by side.
+    const tiles = rows
+      .filter((row) => row.some((tense) => tense && tenses.has(key(tense[0]))))
+      .map(([simple, compound]) => tile(simple) + tile(compound))
       .join("");
     if (tiles) html += `<div class="mood"><div class="mood-name">${esc(mood)}</div><div class="tenses">${tiles}</div></div>`;
   }
-  html += `<button class="link toggle-compound">${esc(t("entry.showCompound"))}</button>`;
   html += otherForms("fr", other, matched, t("entry.otherForms"));
   return html;
 }
